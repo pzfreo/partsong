@@ -364,6 +364,135 @@ def _parse_staffs_fixed(*args, **kwargs):
 
 homr_main.parse_staffs = _parse_staffs_fixed
 
+# Speed-ups for homr's staff detection (same results, found faster):
+# - Shapes are first compared by a cheap distance test, run hundreds of
+#   thousands of times a page; the isinstance checks in it cost more than the
+#   test itself.
+# - find_staff_anchors compares every staff-line fragment with every symbol;
+#   do the cheap test for all fragments at once (numpy) and the exact check
+#   only on those that pass.
+# - Staff.get_at finds the grid point nearest an x by scanning the whole grid;
+#   the grid is in x order, so bisect.
+import bisect  # noqa: E402
+
+import numpy as _np  # noqa: E402
+
+from homr import constants, staff_detection  # noqa: E402
+
+
+_can_shapes_possibly_touch = bounding_boxes.AngledBoundingBox._can_shapes_possibly_touch
+
+
+def _can_shapes_possibly_touch_fast(self, other):
+    center1, axes1, _ = self.box
+    center2, axes2, _ = other.rotated_box if hasattr(other, "rotated_box") else other.box
+    distance = ((center1[0] - center2[0]) ** 2 + (center1[1] - center2[1]) ** 2) ** 0.5
+    return not distance > max(axes1) + max(axes2)
+
+
+bounding_boxes.AngledBoundingBox._can_shapes_possibly_touch = _can_shapes_possibly_touch_fast
+
+_find_staff_anchors = staff_detection.find_staff_anchors
+
+
+def _find_staff_anchors_fast(staff_lines, anchor_symbols, are_clefs=False):
+    if not staff_lines:
+        return _find_staff_anchors(staff_lines, anchor_symbols, are_clefs)
+    centers = _np.array([line.box[0] for line in staff_lines], dtype=_np.float64)
+    reach = _np.array([max(line.box[1]) for line in staff_lines], dtype=_np.float64)
+    shift = 80 if are_clefs else 10  # how far homr moves each symbol sideways
+    result = []
+    for symbol in anchor_symbols:
+        # homr tests copies of the symbol moved by up to `shift` and made taller
+        # by a unit; a line that can touch any of them is within this margin.
+        (cx, cy), axes, _ = symbol.box
+        unit = round(symbol.size[1] / (constants.number_of_lines_on_a_staff - 1))
+        distance = ((centers[:, 0] - cx) ** 2 + (centers[:, 1] - cy) ** 2) ** 0.5
+        near = _np.nonzero(distance <= reach + max(axes) + abs(unit) + shift + 1)[0]
+        result.extend(_find_staff_anchors([staff_lines[k] for k in near], [symbol], are_clefs))
+    return result
+
+
+staff_detection.find_staff_anchors = _find_staff_anchors_fast
+
+_get_at = homr_model.Staff.get_at
+
+
+def _get_at_fast(self, x):
+    xs = getattr(self, "_grid_xs", None)
+    if xs is None:
+        xs = [p.x for p in self.grid]
+        self._grid_xs = xs if all(a <= b for a, b in zip(xs, xs[1:])) else False
+        xs = self._grid_xs
+    if xs is False:
+        return _get_at(self, x)
+    i = bisect.bisect_left(xs, x)
+    if i == len(xs) or (i > 0 and abs(xs[i - 1] - x) <= abs(xs[i] - x)):
+        i -= 1
+    closest = self.grid[i]
+    if abs(closest.x - x) > constants.staff_position_tolerance:
+        return None
+    return closest
+
+
+homr_model.Staff.get_at = _get_at_fast
+
+# homr's decoder runs a greedy loop of hundreds of model steps per staff. In
+# the browser each step crossed from Python to JavaScript and back with all
+# the outputs copied; omrOrt.generate (omr-worker.js) runs the same loop in
+# JavaScript and returns the chosen tokens and attention of every step.
+from homr.transformer import decoder_inference  # noqa: E402
+
+_generate = decoder_inference.ScoreDecoder.generate
+
+
+def _generate_in_js(self, start_tokens, nonote_tokens, **kwargs):
+    if self.fp16 or not hasattr(self.net, "_id"):  # not the browser's sessions
+        return _generate(self, start_tokens, nonote_tokens, **kwargs)
+    import numpy as np
+    from onnxruntime import _to_js_bytes
+    from pyodide.ffi import run_sync, to_js
+
+    import js
+
+    context = np.ascontiguousarray(kwargs["context"], dtype=np.float32)
+    heads = self.config.decoder_heads
+    result = run_sync(
+        js.omrOrt.generate(
+            self.net._id,
+            to_js(list(context.shape)),
+            _to_js_bytes(context),
+            int(np.asarray(start_tokens).reshape(-1)[-1]),
+            int(np.asarray(nonote_tokens).reshape(-1)[-1]),
+            int(self.eos_token),
+            int(self.max_seq_len),
+            heads,
+            self.config.decoder_dim // heads,
+            self.config.decoder_depth * 4,
+        )
+    )
+    tokens = np.frombuffer(result.tokens.to_bytes(), dtype=np.int32).reshape(-1, 6).astype(np.int64)
+    dims = list(result.attentionDims.to_py())
+    attention = np.frombuffer(result.attention.to_bytes(), dtype=np.float32).reshape([len(tokens), *dims])
+    detokenize = decoder_inference.detokenize
+    symbols = []
+    for (rhythm, pitch, lift, position, articulation, slur), att in zip(tokens, attention):
+        symbols.append(
+            EncodedSymbol(
+                rhythm=detokenize(np.array([[rhythm]]), self.inv_rhythm_vocab)[0],
+                pitch=detokenize(np.array([[pitch]]), self.inv_pitch_vocab)[0],
+                lift=detokenize(np.array([[lift]]), self.inv_lift_vocab)[0],
+                articulation=detokenize(np.array([[articulation]]), self.inv_articulation_vocab)[0],
+                slur=detokenize(np.array([[slur]]), self.inv_slur_vocab)[0],
+                position=detokenize(np.array([[position]]), self.inv_position_vocab)[0],
+                coordinates=att,
+            )
+        )
+    return symbols
+
+
+decoder_inference.ScoreDecoder.generate = _generate_in_js
+
 # Skip writing the preview PNG; the app shows the original photo instead.
 Debug.write_teaser = lambda *args, **kwargs: None
 
@@ -390,15 +519,19 @@ def recognise(image_path, systems_json=""):
         return f.read()
 
 
-def recognise_profiled(image_path):  # TEMPORARY profiling
-    import cProfile, io, pstats
-    pr = cProfile.Profile()
-    pr.enable()
-    out = recognise(image_path)
-    pr.disable()
+def recognise_profiled(image_path, systems_json=""):
+    """recognise(), printing where the Python's time goes (tests/omr-bench.html)."""
+    import cProfile
+    import io
+    import pstats
+
+    profile = cProfile.Profile()
+    profile.enable()
+    out = recognise(image_path, systems_json)
+    profile.disable()
     s = io.StringIO()
-    st = pstats.Stats(pr, stream=s)
-    st.sort_stats("cumtime").print_callers("is_overlapping|_can_shapes_possibly_touch")
-    st.sort_stats("cumtime").print_stats(30)
+    stats = pstats.Stats(profile, stream=s)
+    stats.sort_stats("tottime").print_stats(25)
+    stats.sort_stats("cumtime").print_stats(35)
     print(s.getvalue())
     return out

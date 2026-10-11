@@ -190,6 +190,65 @@ self.omrOrt = {
     });
   },
 
+  // homr's greedy decoding loop for one staff (homr/transformer/
+  // decoder_inference.py ScoreDecoder.generate), run here so the hundreds of
+  // steps per staff don't each cross into Python and back. Returns, per step,
+  // the chosen token of each head (rhythm, pitch, lift, position, articulation,
+  // slur) and the attention output; the step whose rhythm is EOS isn't included.
+  async generate(id, contextDims, contextBytes, start, nonote, eos, maxLen, heads, headDim, caches) {
+    const t0 = performance.now();
+    const session = sessions[id];
+    const context = new ort.Tensor("float32", new Float32Array(contextBytes.slice().buffer), contextDims);
+    // After the first step homr passes only the context's first position.
+    const reduced = new ort.Tensor("float32", context.data.slice(0, contextDims[2]), [contextDims[0], 1, contextDims[2]]);
+    const token = (v) => new ort.Tensor("int64", BigInt64Array.of(BigInt(v)), [1, 1]);
+    const heads6 = ["out_rhythms", "out_pitchs", "out_lifts", "out_positions", "out_articulations", "out_slurs"];
+    const names = [...heads6, "attention", ...Array.from({ length: caches }, (_, i) => `cache_out${i}`)];
+    let cache = Array.from({ length: caches }, () => new ort.Tensor("float32", new Float32Array(0), [1, heads, 0, headDim]));
+    let last = { rhythm: start, pitch: nonote, lift: nonote, articulation: nonote, slur: nonote };
+    const tokens = [];
+    const attention = [];
+    let attentionDims = [];
+    let steps = 0;
+    for (let step = 0; step < maxLen; step++) {
+      const feeds = {
+        rhythms: token(last.rhythm),
+        pitchs: token(last.pitch),
+        lifts: token(last.lift),
+        articulations: token(last.articulation),
+        slurs: token(last.slur),
+        context: step === 0 ? context : reduced,
+        cache_len: new ort.Tensor("int64", BigInt64Array.of(BigInt(step)), [1]),
+      };
+      cache.forEach((t, i) => (feeds[`cache_in${i}`] = t));
+      const out = await session.run(feeds, names);
+      steps++;
+      cache = names.slice(7).map((n) => out[n]);
+      // Greedy: the most likely token at the last position of each head.
+      const pick = (n) => {
+        const t = out[n];
+        const size = t.dims.at(-1);
+        const d = t.data;
+        let best = d.length - size;
+        for (let k = best + 1; k < d.length; k++) if (d[k] > d[best]) best = k;
+        return best - (d.length - size);
+      };
+      const chosen = heads6.map(pick);
+      if (chosen[0] === eos) break;
+      tokens.push(...chosen);
+      const a = out.attention;
+      attentionDims = a.dims;
+      attention.push(Float32Array.from(a.data));
+      last = { rhythm: chosen[0], pitch: chosen[1], lift: chosen[2], articulation: chosen[4], slur: chosen[5] };
+    }
+    const t = (runTimes[id] ??= { calls: 0, ms: 0 });
+    t.calls += steps;
+    t.ms += performance.now() - t0;
+    const flat = new Float32Array(attention.reduce((n, a) => n + a.length, 0));
+    attention.reduce((at, a) => (flat.set(a, at), at + a.length), 0);
+    return { tokens: Int32Array.from(tokens), attention: new Uint8Array(flat.buffer), attentionDims };
+  },
+
   // The contents of a kept output, if Python does want to read one.
   data(handle) {
     const d = kept.get(handle).data;
@@ -199,6 +258,7 @@ self.omrOrt = {
 
 let pyodide;
 let recognise;
+let recogniseProfiled;
 // Per page: time inside each model (session id -> { calls, ms }); the rest of
 // the page's time is homr's Python (image processing, decoding) in Pyodide.
 let runTimes = [];
@@ -241,6 +301,7 @@ async function init() {
   }
   pyodide.runPython(`import sys; sys.path.insert(0, "${lib}")`);
   recognise = pyodide.pyimport("runner").recognise;
+  recogniseProfiled = pyodide.pyimport("runner").recognise_profiled;
 
   for (const name of MODELS) {
     await downloadModel(name);
@@ -261,7 +322,8 @@ self.onmessage = async ({ data }) => {
       const t0 = performance.now();
       runTimes = [];
       // data.systems: the user's systems for this page (JSON), if they fixed it.
-      const xml = await recognise.callPromising(path, data.systems ?? "");
+      // data.profile (tests/omr-bench.html): logs where the Python's time goes.
+      const xml = await (data.profile ? recogniseProfiled : recognise).callPromising(path, data.systems ?? "");
       const ms = Math.round(performance.now() - t0);
       const names = [...sessionIds.keys()];
       const parts = names.map((n) => `${n.split("_")[0]} ${Math.round(runTimes[sessionIds.get(n)]?.ms ?? 0)} ms/${runTimes[sessionIds.get(n)]?.calls ?? 0} calls`);

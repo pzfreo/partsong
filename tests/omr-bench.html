@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8"><title>OMR benchmark</title>
+<pre id="log"></pre>
+<script>
+// Reads several pages with one warm music reader and reports each page's time
+// split (models vs Python) and its MusicXML, to measure reader changes.
+// ?pages=a.png,b.png (in testdata/bench/) &profile=1 (cProfile the Python).
+const log = (s) => { console.log(s); document.getElementById("log").textContent += s + "\n"; };
+const q = new URLSearchParams(location.search);
+const pages = (q.get("pages") || "huron-1.png,tree-1.png,scar-7.png,six-2.png,rose-4.png").split(",");
+const w = new Worker("../omr-worker.js", { type: "module" });
+window.result = null;
+const out = { pages: [] };
+let i = 0, current = null;
+const next = async () => {
+  if (i >= pages.length) return (window.result = out);
+  const img = await (await fetch("../testdata/bench/" + pages[i])).arrayBuffer();
+  current = { page: pages[i], t0: performance.now(), logs: [] };
+  w.postMessage({ type: "recognise", id: ++i, image: img, profile: q.has("profile") }, [img]);
+};
+w.onmessage = ({ data }) => {
+  if (data.type === "ready") return next();
+  if (data.type === "log" && /^Page in/.test(data.msg)) current.split = data.msg;
+  if (data.type === "log" && current) current.logs.push(data.msg);
+  if (data.type === "result") { out.pages.push({ ...current, ms: Math.round(performance.now() - current.t0), xml: data.xml }); log(current.page + " " + current.split); next(); }
+  if (data.type === "error") { out.pages.push({ ...current, error: data.msg }); log("ERROR " + data.msg); next(); }
+};
+w.postMessage({ type: "init" });
+</script>
