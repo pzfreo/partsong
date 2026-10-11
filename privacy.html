@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Privacy – Partsong</title>
+  <meta name="description" content="What Partsong does with your music and your data: what stays on your device, what leaves it, and why.">
+  <link rel="canonical" href="https://partsong.app/privacy.html">
+  <meta name="theme-color" content="#2b2870">
+  <link rel="icon" href="favicon.ico" sizes="48x48">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <a href="./" class="icon-btn" aria-label="Back to Partsong">&larr;</a>
+    <h1>Partsong</h1>
+  </header>
+  <main class="legal">
+    <h2>Privacy</h2>
+    <p class="muted">Last updated 11 October 2026</p>
+
+    <p>Partsong is built so that your music stays with you. There are no accounts, no cookies and no advertising. This page explains what stays on your device, what leaves it, who handles it and why.</p>
+
+    <h3>Who is responsible</h3>
+    <p>Partsong is run by Paul Fremantle, in the United Kingdom, who is the data controller for the little personal data described here. For anything about your data, email <a href="mailto:bugs@partsong.app">bugs@partsong.app</a>.</p>
+
+    <h3>What stays on your device</h3>
+    <p>When you scan or open music, the photos or PDF pages are read <strong>on your device</strong>: the music reader runs in your browser and nothing is uploaded to do it. Your scores (photos, the music as read, your marks and settings) are stored in your browser's storage on that device. A few preferences (such as the sound you chose, or that you said "Not now" to installing) are kept there too. Deleting a score in Partsong deletes it from the device; clearing the site's data in your browser deletes everything.</p>
+
+    <h3>What leaves your device</h3>
+
+    <h4>Scores you share</h4>
+    <p>When you share a score as a link, Partsong encrypts it on your device (AES-GCM) and uploads only the encrypted copy to Partsong's link service, which runs on <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare</a>. The key needed to open it is part of the link itself, after the <code>#</code>, and browsers never send that part to a server. So neither Partsong nor Cloudflare can see the music, the photos or the score's name; only people you give the link to can open it. Encrypted copies are deleted a year after upload. If you want a shared copy removed sooner, email us the link.</p>
+    <p>When you share from a computer, the song's name is copied with the link so that it shows in your message. That text goes wherever you paste it.</p>
+    <p>Sharing audio, or using <strong>Export PDF</strong>, makes a file on your device and hands it to your phone's share sheet or your downloads. Partsong doesn't upload it; where it goes after that is up to you.</p>
+
+    <h4>Problem reports</h4>
+    <p>If you use <strong>Report a problem</strong>, your email app or share sheet opens with a report addressed to us, which you can read and edit before sending. It includes what you write, your device and browser, the app's version, recent errors and messages from the music reader, and, from a score's screen, that score's name and parts. Sent from a score's screen, the score file (with its photos) is attached too. Nothing is sent unless you send it. We use reports only to fix problems, and delete them when they're no longer needed for that.</p>
+
+    <h4>Usage counts</h4>
+    <p>To see which features get used, Partsong counts visits and actions (such as reading a score, pressing play or sharing) with <a href="https://www.goatcounter.com/help/privacy" target="_blank" rel="noopener">GoatCounter</a>. It sets no cookies and doesn't identify you. GoatCounter receives your IP address, browser and screen size with each count, uses them to tell visits apart and to find the country, and doesn't store the address. The counts never include your scores or their names; the most they record about a reading is how many pages it had.</p>
+
+    <h4>Loading the app</h4>
+    <p>Like any website, the services that deliver Partsong see your IP address and browser when they send you its files:</p>
+    <ul>
+      <li><a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub Pages</a> hosts the app and the music reader's models.</li>
+      <li><a href="https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net" target="_blank" rel="noopener">jsDelivr</a> delivers open-source libraries the app uses (the music reader's runtime, and the PDF, score display and audio libraries).</li>
+      <li>Cloudflare runs the link service, used when you share or open a link.</li>
+    </ul>
+    <p>They keep short-lived logs under their own privacy policies. Partsong doesn't receive those logs.</p>
+
+    <h3>Why (the legal basis)</h3>
+    <p>Usage counts and problem reports are handled on the basis of our legitimate interest in keeping Partsong working and improving it, in ways you'd expect and that don't identify you. Shared copies are stored because you ask for them to be, to provide the link you're sharing.</p>
+
+    <h3>Where</h3>
+    <p>GitHub, jsDelivr, Cloudflare and GoatCounter may handle data outside the UK. Where they do, they rely on the safeguards UK data protection law requires, as set out in their policies.</p>
+
+    <h3>Your rights</h3>
+    <p>Under UK data protection law you can ask to see, correct or delete personal data we hold about you, or object to how we use it. In practice we hold very little: problem reports you've sent us, and encrypted shared copies we can't open. Email <a href="mailto:bugs@partsong.app">bugs@partsong.app</a>. You can also complain to the <a href="https://ico.org.uk/make-a-complaint/" target="_blank" rel="noopener">Information Commissioner's Office</a>.</p>
+
+    <h3>Children</h3>
+    <p>Partsong asks for no personal details and is fine for choir members of any age. Younger children should share scores and send reports with a parent's help.</p>
+
+    <h3>Changes</h3>
+    <p>If what Partsong does with data changes, this page will change first, with a new date at the top.</p>
+
+    <p class="legal-links"><a href="terms.html">Terms of use</a> · <a href="./">Back to Partsong</a></p>
+  </main>
+</body>
+</html>

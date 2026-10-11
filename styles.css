@@ -299,6 +299,16 @@ input[type="radio"], input[type="checkbox"] { width: 20px; height: 20px; accent-
 .page-zoom img { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
 .page-zoom-bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: var(--bg); }
 .page-zoom-bar span { flex: 1; color: var(--muted); }
+/* Privacy notice and terms (privacy.html, terms.html). */
+.legal { line-height: 1.55; }
+.legal h2 { font-size: 1.5rem; margin-top: 8px; }
+.legal h3 { font-size: 1.08rem; margin: 26px 0 6px; }
+.legal h4 { font-size: 0.98rem; margin: 18px 0 4px; }
+.legal p, .legal li { font-size: 0.95rem; }
+.legal a { color: var(--accent); }
+.legal-links { margin-top: 32px; }
+.report-link a { color: var(--accent); }
+header a.icon-btn { color: inherit; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 .about-card h2 small { font-size: 0.8rem; font-weight: 400; color: var(--muted); }
 .about-card h3 { font-size: 1rem; margin: 18px 0 6px; }
 .about-card p, .credits { font-size: 0.92rem; margin: 0 0 8px; }
