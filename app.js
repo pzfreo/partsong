@@ -516,6 +516,20 @@ function track(name, title = name) {
   } catch {}
 }
 
+// Why a reading failed, short enough to count: the error's last line (a
+// Python traceback ends with the actual error), without file paths, and with
+// numbers as N so the same failure counts together. Never the score or photo.
+function failureReason(e) {
+  const last = String(e?.message ?? e).trim().split("\n").at(-1) || e?.name || "unknown";
+  return (
+    last
+      .replace(/^(Exception|Error): /, "")
+      .replace(/(\/[\w.-]+)+/g, "…")
+      .replace(/\d+(\.\d+)?/g, "N")
+      .slice(0, 80) || "unknown"
+  );
+}
+
 async function trySample() {
   track("sample");
   if (reading) return show("scan");
@@ -762,6 +776,7 @@ async function readScan() {
       return;
     }
     track("read-failed");
+    track(`read-failed: ${failureReason(e)}`);
     // A Python traceback ends with the actual error; show that first, since
     // the full trace runs off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
