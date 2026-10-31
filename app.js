@@ -98,14 +98,17 @@ window.addEventListener("popstate", (e) => {
 
 const REPORT_TO = "bugs@partsong.app";
 const VERSION = new URL(import.meta.url).searchParams.get("v") || "dev";
-$("header-version").textContent = VERSION;
+// Deploys are numbered by how many commits main has (see pages.yml), so a
+// newer version always has a bigger number.
+const SHOWN_VERSION = /^\d+$/.test(VERSION) ? `v${VERSION}` : VERSION;
+$("header-version").textContent = SHOWN_VERSION;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 function diagnostics() {
   const screen = ["home", "scan", "practice"].find((s) => !$(s).hidden) || "?";
   const lines = [
-    `Partsong ${VERSION} · ${location.host}`,
+    `Partsong ${SHOWN_VERSION} · ${location.host}`,
     `Device: ${navigator.userAgent}`,
     `Screen: ${innerWidth}×${innerHeight} @${devicePixelRatio}x` +
       (navigator.deviceMemory ? ` · ${navigator.deviceMemory} GB RAM` : "") +
@@ -167,7 +170,7 @@ $("report").onclick = (e) => e.target === $("report") && closeReport();
 // About: version, privacy, licence (AGPL: the source link is the offer of
 // source to network users) and third-party credits.
 function openAbout() {
-  $("about-version").textContent = VERSION;
+  $("about-version").textContent = SHOWN_VERSION;
   $("about").hidden = false;
   history.pushState({ ...history.state, about: true }, "");
 }

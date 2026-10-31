@@ -22,6 +22,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the whole history, to number the version
       - name: Fetch homr source and models
         run: scripts/fetch-homr.sh
       - name: Assemble site
@@ -31,8 +33,11 @@ jobs:
             omr models fonts _site/
           cp vendor/homr.zip _site/vendor/
           mkdir -p _site/samples && cp samples/tallis-if-ye-love-me.pdf _site/samples/
+      # The version is the number of commits on main: it only ever goes up
+      # (v121, v122, ...), and `git rev-list --reverse HEAD | sed -n 121p`
+      # gives the commit a version came from.
       - name: Stamp the version onto the app's CSS/JS references
-        run: node scripts/stamp-version.mjs _site "$(git rev-parse --short HEAD)"
+        run: node scripts/stamp-version.mjs _site "$(git rev-list --count HEAD)"
       - name: Check every precached app file is in the site
         run: |
           node -e '
