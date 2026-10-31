@@ -126,6 +126,12 @@ def _layout_runs(rows):
     uniform = len({len(r.staffs) for r in rows}) == 1 and len(rows[0].staffs) > 1
     core = None if uniform else staff_parsing._find_periodic_core(flat)
     grouped = len(rows) > 1 and any(len(r.staffs) > 1 for r in rows)
+    if core is not None and grouped and core[0] == 1:
+        # Every staff is the same kind (no grand staves), so a "pattern" of
+        # one staff says nothing and would read all the staves as one part.
+        # Trust homr's grouping instead (e.g. a melody alone on some systems,
+        # with the choir on others).
+        core = None
     if core is not None and grouped:
         # Don't trim through a system homr grouped itself.
         cuts = (core[1], len(flat) - core[2])
@@ -274,6 +280,7 @@ def _parse_staffs_by_layout(debug, staffs, image, config, selected_staff=-1, pag
     regions = StaffRegions([row for run in runs for row in run])
     parts = {}  # (grand staff?, k-th of that kind) -> symbols
     order = []
+    rows_read = []  # bars in each row so far, to fill parts that start later
     index = 0
     for run in runs:
         seen = {}
@@ -296,13 +303,15 @@ def _parse_staffs_by_layout(debug, staffs, image, config, selected_staff=-1, pag
                     read[key] = symbols
             bars = max((_bar_count(s) for s in read.values()), default=0)
             for key in order:
+                if key not in parts:
+                    # First seen here: empty bars for the rows before, keeping
+                    # their line breaks so the systems stay apart.
+                    parts[key] = [
+                        sym for n in rows_read for sym in [EncodedSymbol("barline")] * n + [EncodedSymbol("newline")]
+                    ]
                 filler = [EncodedSymbol("barline") for _ in range(bars)]
-                parts.setdefault(key, []).extend(read.get(key, filler) + [EncodedSymbol("newline")])
-    # Parts first seen in a later run need empty bars for the earlier runs too.
-    total = max(_bar_count(s) for s in parts.values())
-    for key in order:
-        missing = total - _bar_count(parts[key])
-        parts[key] = [EncodedSymbol("barline") for _ in range(missing)] + parts[key]
+                parts[key].extend(read.get(key, filler) + [EncodedSymbol("newline")])
+            rows_read.append(bars)
     return [remove_duplicated_symbols(parts[key]) for key in order]
 
 

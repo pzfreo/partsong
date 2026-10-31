@@ -570,6 +570,10 @@ export function buildScore(pages) {
         lines.push(...b.partLines.map((l, i) => ({ ...l, label: plural ? `Piano ${i + 1}` : "Piano", fixedLabel: true, accompaniment: true })));
       } else lines.push(...labelLines(b.partLines, b.info, built.length));
     }
+  } else if (singing.length >= 2 && singing.length === built.length) {
+    // Only one-line parts (e.g. a melody, with harmony staves on some systems):
+    // number them rather than call each one "Solo".
+    singing.forEach((b, i) => lines.push({ ...b.partLines[0], label: `Voice ${i + 1}` }));
   } else for (const b of built) lines.push(...labelLines(b.partLines, b.info, built.length));
   if (lines.length === 4 && lines.every((l) => !l.fixedLabel)) {
     ["Soprano", "Alto", "Tenor", "Bass"].forEach((name, i) => (lines[i].label = name));
