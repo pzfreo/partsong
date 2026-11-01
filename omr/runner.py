@@ -161,6 +161,29 @@ def _layout_runs(rows):
     return [run for piece in pieces if piece for run in _layout_runs(piece)]
 
 
+def _join_split_rows(rows):
+    """homr sometimes splits a system in two (a voice staff, then the piano
+    below it as a row of its own). Join a row to the grand staff (piano) below
+    it when together they're the shape of another system on the page and sit
+    no further apart than that system's own staves do. (Not rows of plain
+    staves: those can genuinely be systems of different sizes.)"""
+    kinds = lambda row: tuple(s.is_grandstaff for s in row.staffs)  # noqa: E731
+
+    def inner_gap(row):
+        return max(b.min_y - a.max_y for a, b in zip(row.staffs, row.staffs[1:]))
+
+    rows = list(rows)
+    i = 0
+    while i + 1 < len(rows):
+        a, b = rows[i], rows[i + 1]
+        alike = [r for j, r in enumerate(rows) if j not in (i, i + 1) and kinds(r) == kinds(a) + kinds(b)]
+        gap = b.staffs[0].min_y - a.staffs[-1].max_y
+        if all(kinds(b)) and alike and gap <= 1.25 * max(inner_gap(r) for r in alike):
+            rows[i : i + 2] = [homr_model.MultiStaff(a.staffs + b.staffs, a.connections + b.connections)]
+        i += 1
+    return rows
+
+
 def _bar_count(symbols):
     bars, open_bar = 0, False
     for s in symbols:
@@ -274,6 +297,7 @@ def _parse_staffs_by_layout(debug, staffs, image, config, selected_staff=-1, pag
         staffs = _user_systems(staffs, page_to_input_image)
         runs = _runs_of_alike_rows(staffs)
     else:
+        staffs = _join_split_rows(staffs)
         runs = _layout_runs(staffs)
     if len(runs) == 1 and not _user_ranges:
         return _parse_staffs(debug, staffs, image, config, selected_staff, page_to_input_image)

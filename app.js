@@ -758,8 +758,24 @@ async function readScan() {
       if (pages[i].xml) continue;
       pageLabel = `Page ${i + 1} of ${pages.length}`;
       setPageStatus("finding staves…");
-      pages[i].xml = await Promise.race([recognisePage(await normalise(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
-      if (saved) await db.update(scanId, { pages: pages.map((p) => p.xml ?? null), resumes: 0 }).catch(() => {});
+      try {
+        pages[i].xml = await Promise.race([recognisePage(await normalise(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
+      } catch (e) {
+        // A cover or words-only page: leave it out and read the rest (unless
+        // it's the only page left, when the error is the answer).
+        if (e instanceof Stopped || pages.length === 1 || !/No (staffs|noteheads) found\s*$/.test(e.message)) throw e;
+        track("read-skipped-page");
+        URL.revokeObjectURL(pages[i].url);
+        pages.splice(i, 1);
+        if (scanSettings.systemHints) {
+          const hints = {};
+          for (const [k, v] of Object.entries(scanSettings.systemHints)) if (+k !== i) hints[+k > i ? +k - 1 : k] = v;
+          scanSettings.systemHints = hints;
+        }
+        renderPages();
+        i--;
+      }
+      if (saved) await db.update(scanId, { images: pages.map((p) => p.blob), pages: pages.map((p) => p.xml ?? null), resumes: 0 }).catch(() => {});
     }
     pageLabel = "";
     setPageStatus(`Done in ${Math.round((performance.now() - t0) / 1000)} s`);
@@ -1318,19 +1334,19 @@ const hide = (el) => (el.style.display = "none");
 // marks the note your part is singing.
 function follow(beat, playing = true) {
   const bar = barAt(beat);
-  if (!bar.box) return;
+  if (!bar.area) return;
   const view = pageViews[bar.page];
   if (!view?.w) return;
   if (bar !== followedBar) {
     for (const v of pageViews) [v.bar, v.playhead, v.note].forEach(hide);
-    const r = padded(bar.box, view);
+    const r = padded(bar.area, view);
     showEl(view.bar, { x: r.x, y: r.y, width: r.w, height: r.h, rx: view.w * 0.006 });
     followedBar = bar;
     if (playing) keepInView(view.bar);
   }
   if (!playing) return;
 
-  const r = padded(bar.box, view);
+  const r = padded(bar.area, view);
   const onsets = bar.onsets;
   const i = onsets.findLastIndex((o) => o.t <= beat + 1e-6);
   const from = i >= 0 ? onsets[i] : { t: bar.start, x: r.x };
@@ -1377,10 +1393,10 @@ function pickBar(page, e) {
   let best = null;
   let bestDist = Infinity;
   for (const bar of score.measures) {
-    if (bar.page !== page || !bar.box) continue;
-    const r = padded(bar.box, view);
-    const dx = Math.max(r.x - x, 0, x - (r.x + r.w));
-    const dy = Math.max(r.y - y, 0, y - (r.y + r.h));
+    if (bar.page !== page || !bar.area) continue;
+    const r = bar.area; // not padded: the padding reaches into the next system
+    const dx = Math.max(r.x0 - x, 0, x - r.x1);
+    const dy = Math.max(r.y0 - y, 0, y - r.y1);
     const d = dx * dx + dy * dy;
     if (d < bestDist) [best, bestDist] = [bar, d];
   }

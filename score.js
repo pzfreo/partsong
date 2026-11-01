@@ -580,6 +580,7 @@ export function buildScore(pages) {
   }
   lines.forEach((l, i) => (l.id = i));
   const systems = findSystems(measures, lines, staffBoxes);
+  barAreas(systems);
   return { title: pages.find((p) => p.title)?.title || "", measures, lines, systems, length: t };
 }
 
@@ -684,6 +685,30 @@ function findSystems(measures, lines, staffBoxes = []) {
     }
   }
   return systems;
+}
+
+// The part of the photo that is each bar, for tapping and highlighting: the
+// whole height of its system (a bar's notes may sit on one staff only), and
+// across from halfway after the bar before to halfway before the bar after
+// (its notes may be bunched up). A misread bar out of order keeps its notes' box.
+function barAreas(systems) {
+  for (const sys of systems) {
+    const staves = sys.staves.filter((st) => Number.isFinite(st.y0));
+    const y0 = staves.length ? Math.min(...staves.map((st) => st.y0)) : null;
+    const y1 = staves.length ? Math.max(...staves.map((st) => st.y1)) : null;
+    const left = Math.min(...staves.map((st) => st.x0 ?? Infinity));
+    const right = Math.max(...staves.map((st) => st.x1 ?? -Infinity));
+    const bars = sys.bars.filter((b) => b.box && b.page === sys.page);
+    bars.forEach((bar, i) => {
+      const prev = bars[i - 1]?.box;
+      const next = bars[i + 1]?.box;
+      let x0 = prev ? (prev.x1 + bar.box.x0) / 2 : Math.min(bar.box.x0, left);
+      let x1 = next ? (bar.box.x1 + next.x0) / 2 : Math.max(bar.box.x1, right);
+      if (!(x0 <= bar.box.x0 && x1 >= bar.box.x1)) [x0, x1] = [bar.box.x0, bar.box.x1];
+      bar.area = y0 == null ? bar.box : { x0, x1, y0, y1 };
+    });
+    for (const bar of sys.bars) if (bar.box) bar.area ??= bar.box;
+  }
 }
 
 function labelLines(partLines, info, partCount) {

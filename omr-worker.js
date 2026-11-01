@@ -4,6 +4,8 @@
 
 const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/";
 const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
+// Safari has JSPI but (in 27, at least) refuses Pyodide's way of using it.
+const NO_JSPI = "Partsong can't read music in this browser yet. Please use Chrome or Edge on a computer or Android phone.";
 const MODEL_CACHE = "partscanner-models-v1";
 const MODELS = [
   "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx",
@@ -265,7 +267,7 @@ let runTimes = [];
 
 async function init() {
   if (typeof WebAssembly.Suspending !== "function") {
-    throw new Error("This browser lacks WebAssembly JSPI. Use an up-to-date Chrome.");
+    throw new Error(NO_JSPI);
   }
   ort = await import(ORT_URL + "ort.webgpu.min.mjs");
   ort.env.wasm.wasmPaths = ORT_URL;
@@ -280,6 +282,14 @@ async function init() {
   pyodide = await loadPyodide({ indexURL: PYODIDE_URL });
   pyodide.setStderr({ batched: (msg) => post({ type: "log", msg }) });
   pyodide.setStdout({ batched: (msg) => post({ type: "log", msg }) });
+  // Python waiting on a JavaScript promise is how every model call works;
+  // check it before downloading ~100 MB of models.
+  try {
+    await pyodide.runPython("from pyodide.ffi import run_sync\nlambda p: run_sync(p)").callPromising(Promise.resolve(1));
+  } catch (e) {
+    console.warn(e);
+    throw new Error(NO_JSPI);
+  }
   await pyodide.loadPackage(["numpy", "opencv-python", "pillow", "typing-extensions"]);
 
   const lib = "/home/pyodide/lib";
@@ -332,6 +342,7 @@ self.onmessage = async ({ data }) => {
       post({ type: "result", id: data.id, xml, ms });
     }
   } catch (e) {
-    post({ type: "error", id: data.id, msg: String(e && e.message ? e.message : e) });
+    const msg = String(e && e.message ? e.message : e);
+    post({ type: "error", id: data.id, msg: /WebAssembly\.(Suspending|promising)/.test(msg) ? NO_JSPI : msg });
   }
 };
