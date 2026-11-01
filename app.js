@@ -516,12 +516,13 @@ const ua = navigator.userAgent;
 const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 const macSafari = !iDevice && /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS|OPR/.test(ua);
 if (iDevice || macSafari) {
-  $("no-reader").textContent = iDevice
+  const text = iDevice
     ? "iPhones and iPads can't read scans: reading the music needs a browser feature they don't have yet, in any browser. " +
       "They can play scores, though. Scan on an Android phone or a computer with Chrome or Edge, then share the score to this device."
     : "Safari can't read scans: reading the music needs a browser feature it doesn't have yet. " +
       "Scan with Chrome or Edge instead; scores shared with you play fine in Safari.";
-  $("no-reader").hidden = false;
+  for (const p of document.querySelectorAll(".no-reader")) Object.assign(p, { textContent: text, hidden: false });
+  document.body.classList.add("no-reader-device"); // hides the sample (styles.css): it's a PDF to read
 }
 
 // The sample score (samples/tallis-if-ye-love-me.pdf, from CPDL):

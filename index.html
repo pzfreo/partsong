@@ -121,6 +121,7 @@
         <button id="new-scan" class="primary">Scan music</button>
         <label class="button">Open PDF<input id="open-xml" type="file" accept=".pdf,application/pdf,.html,text/html,.musicxml,.xml,application/vnd.recordare.musicxml+xml" multiple hidden></label>
       </div>
+      <p class="no-reader" hidden></p>
       <h2>Your scores</h2>
       <div id="install-card" class="install-card" hidden>
         <p><strong>Install Partsong</strong>: it opens like an app, straight from your home screen, and works offline.</p>
@@ -142,7 +143,7 @@
       <p id="library-none" class="muted" hidden>No scores match.</p>
       <div id="library-empty">
         <p class="muted">Nothing scanned yet.</p>
-        <p class="muted">Or try it out with a sample: Tallis's <em>If ye love me</em>, three pages for four voices.</p>
+        <p class="muted sample-blurb">Or try it out with a sample: Tallis's <em>If ye love me</em>, three pages for four voices.</p>
         <button class="primary try-sample">Try a sample score</button>
       </div>
       <p class="report-link"><span class="footer-sample"><button class="link try-sample">Try a sample score</button> · </span><button class="link report-open">Report a problem</button> · <button class="link about-open">About</button> · <a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a></p>
@@ -150,7 +151,7 @@
 
     <section id="scan" hidden>
       <p class="muted">Add one photo per page, in order, or a PDF. Hold the phone square to the page in good light.</p>
-      <p id="no-reader" class="no-reader" hidden></p>
+      <p class="no-reader" hidden></p>
       <div class="actions">
         <label class="button primary">Take photo<input id="camera" type="file" accept="image/*" capture="environment" hidden></label>
         <label class="button">Add images or PDF<input id="gallery" type="file" accept="image/*,application/pdf,.pdf" multiple hidden></label>
