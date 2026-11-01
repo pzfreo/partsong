@@ -5,7 +5,7 @@
 const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/";
 const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
 // Safari has JSPI but (in 27, at least) refuses Pyodide's way of using it.
-const NO_JSPI = "Partsong can't read music in this browser yet. Please use Chrome or Edge on a computer or Android phone.";
+const NO_JSPI = "This browser can't read scans yet (iPhones and iPads can't, in any browser). Scan with Chrome or Edge on an Android phone or a computer, then share the score here to play it.";
 const MODEL_CACHE = "partscanner-models-v1";
 const MODELS = [
   "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx",

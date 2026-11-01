@@ -513,11 +513,16 @@ $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
 // music reader (omr-worker.js): say so before they photograph a whole score.
 // (iPadOS asks for desktop sites, so it looks like a Mac with a touch screen.)
 const ua = navigator.userAgent;
-$("no-reader").hidden = !(
-  /iPhone|iPad|iPod/.test(ua) ||
-  (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ||
-  (/Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS|OPR/.test(ua))
-);
+const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const macSafari = !iDevice && /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS|OPR/.test(ua);
+if (iDevice || macSafari) {
+  $("no-reader").textContent = iDevice
+    ? "iPhones and iPads can't read scans: reading the music needs a browser feature they don't have yet, in any browser. " +
+      "They can play scores, though. Scan on an Android phone or a computer with Chrome or Edge, then share the score to this device."
+    : "Safari can't read scans: reading the music needs a browser feature it doesn't have yet. " +
+      "Scan with Chrome or Edge instead; scores shared with you play fine in Safari.";
+  $("no-reader").hidden = false;
+}
 
 // The sample score (samples/tallis-if-ye-love-me.pdf, from CPDL):
 // opens the scan screen with its pages added, ready for Read music.
