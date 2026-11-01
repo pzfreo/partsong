@@ -101,7 +101,7 @@ const VERSION = new URL(import.meta.url).searchParams.get("v") || "dev";
 // Deploys are numbered by how many commits main has (see pages.yml), so a
 // newer version always has a bigger number.
 const SHOWN_VERSION = /^\d+$/.test(VERSION) ? `v${VERSION}` : VERSION;
-$("header-version").textContent = SHOWN_VERSION;
+$("header-version").textContent = `beta · ${SHOWN_VERSION}`;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
