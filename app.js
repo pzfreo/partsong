@@ -515,14 +515,19 @@ $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
 const ua = navigator.userAgent;
 const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 const macSafari = !iDevice && /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS|OPR/.test(ua);
-if (iDevice || macSafari) {
+const noReader = iDevice || macSafari;
+let noReaderText = "";
+if (noReader) {
   const device = /iPhone|iPod/.test(ua) ? "iPhone" : "iPad";
   const text = iDevice
     ? `Scanning doesn't work on ${device} yet. You can still play scores here: scan on an Android phone or a computer, ` +
       `using Chrome or Edge, then share the score to your ${device}.`
     : "Scanning doesn't work in Safari yet. Please scan using Chrome or Edge. Scores shared with you play fine in Safari.";
+  noReaderText = text;
   for (const p of document.querySelectorAll(".no-reader")) Object.assign(p, { textContent: text, hidden: false });
-  document.body.classList.add("no-reader-device"); // hides the sample (styles.css): it's a PDF to read
+  // Hides everything that would start a read (styles.css): Scan music, the
+  // sample, Read again, Fix systems.
+  document.body.classList.add("no-reader-device");
 }
 
 // The sample score (samples/tallis-if-ye-love-me.pdf, from CPDL):
@@ -868,7 +873,8 @@ async function openFiles(files) {
       name ||= f.name.replace(/\.(musicxml|xml)$/i, "");
     }
     // An ordinary PDF is sheet music to read: start at once.
-    if (pdfs.length) {
+    if (pdfs.length && noReader) showNotice(noReaderText);
+    else if (pdfs.length) {
       loadScan();
       if ((await addFiles(pdfs)) && pages.length) readScan();
     }
