@@ -519,11 +519,15 @@ const noReader = iDevice || macSafari;
 let noReaderText = "";
 if (noReader) {
   const device = /iPhone|iPod/.test(ua) ? "iPhone" : "iPad";
+  const where = iDevice ? `on ${device}` : "in Safari";
   const text = iDevice
-    ? `Scanning doesn't work on ${device} yet. You can still play scores here: scan on an Android phone or a computer, ` +
-      `using Chrome or Edge, then share the score to your ${device}.`
-    : "Scanning doesn't work in Safari yet. Please scan using Chrome or Edge. Scores shared with you play fine in Safari.";
-  noReaderText = text;
+    ? `Scanning doesn't work on ${device} yet, so here you can only open scores shared from Partsong. ` +
+      `Scan on an Android phone or a computer using Chrome or Edge, then share the score to your ${device} to play it.`
+    : "Scanning doesn't work in Safari yet, so here you can only open scores shared from Partsong. Please scan using Chrome or Edge.";
+  $("open-xml").previousSibling.textContent = "Open shared score";
+  noReaderText =
+    `This PDF is sheet music to scan, which doesn't work ${where} yet. ` +
+    "Here you can only open scores shared from Partsong (their files end in .partsong.pdf).";
   for (const p of document.querySelectorAll(".no-reader")) Object.assign(p, { textContent: text, hidden: false });
   // Hides everything that would start a read (styles.css): Scan music, the
   // sample, Read again, Fix systems.
