@@ -509,6 +509,16 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
 
 $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
 
+// Every browser on iPhone/iPad is Safari underneath, and Safari can't run the
+// music reader (omr-worker.js): say so before they photograph a whole score.
+// (iPadOS asks for desktop sites, so it looks like a Mac with a touch screen.)
+const ua = navigator.userAgent;
+$("no-reader").hidden = !(
+  /iPhone|iPad|iPod/.test(ua) ||
+  (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ||
+  (/Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS|OPR/.test(ua))
+);
+
 // The sample score (samples/tallis-if-ye-love-me.pdf, from CPDL):
 // opens the scan screen with its pages added, ready for Read music.
 // Anonymous usage counts (GoatCounter, no cookies; see index.html): which
