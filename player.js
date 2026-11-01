@@ -25,6 +25,11 @@ export class Player {
 
   ensureContext() {
     if (this.ctx) return;
+    // On iPhone, web audio is silenced by the ring/silent switch unless it
+    // says it's media playback (Safari 16.4+; other browsers lack audioSession).
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = "playback";
+    } catch {}
     this.ctx = new AudioContext();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.8;
