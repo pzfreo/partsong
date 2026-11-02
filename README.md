@@ -15,26 +15,37 @@ then *Add to Home screen*.
   recognition), as ported to Rust in [homr-rs](https://github.com/pzfreo/homr-rs),
   runs as WebAssembly in a module Web Worker (`omr-worker.js`,
   `omr/partsong_omr.wasm`), so it works in every current browser, iPhone and
-  Safari included. homr's three ONNX models run on
-  [onnxruntime-web](https://onnxruntime.ai) (WebGPU for the segmentation and
-  encoder models when available, WASM for the decoder), driven from the
-  worker: segmentation on the page's tiles, then the encoder and the decoder's
-  greedy loop for each staff the reader asks for. `omr-rs/` is Partsong's own
+  Safari included. homr's segmentation and encoder models run on
+  [onnxruntime-web](https://onnxruntime.ai) (WebGPU when available, else
+  WASM), driven from the worker: segmentation on the page's tiles, then the
+  encoder for each staff the reader asks for. homr's transformer decoder runs in
+  homr-rs itself, from homr's own ONNX file, in a second instance of the module
+  kept for the session. `omr-rs/` is Partsong's own
   part, built on homr-rs: the page interface for the worker and Partsong's
   changes to how homr groups staves into systems (`omr-rs/src/layout.rs`).
   Build it with `scripts/build-omr.sh` (needs Rust; homr-rs comes from GitHub at
-  the revision pinned in `omr-rs/Cargo.toml`).
+  the revision pinned in `omr-rs/Cargo.toml`). It builds two modules: SIMD, and
+  relaxed SIMD (`omr/partsong_omr_fused.wasm`), which the worker uses for
+  the decoder when the browser fuses multiply-adds (it checks).
   It replaced homr in Python under Pyodide, which needed JSPI (Chrome/Edge
   only). On the 148-page test corpus (desktop Chrome) the two gave the same
   MusicXML for all 78 pages with music and the same error for the other 70,
   also with Fix systems; reading took 742 s instead of 1204 s.
-- **Recognition speed**: the decoder (~340 steps a staff) is most of a page's
-  time. The service worker adds COOP/COEP (`credentialless`) headers, which
-  GitHub Pages can't, so the app is cross-origin isolated and the WASM decoder
-  runs on 4 threads. The worker logs each page's time per model and in the
-  reader. Measured and rejected: the decoder is already int8-quantized, and
-  batching staves changes results (its dynamic quantization scale spans the
-  batch).
+- **Matching homr**: the reference is homr run natively (arm64, onnxruntime).
+  homr-rs's decoder chooses the same symbols as homr's on every step of the
+  corpus (627 staves); onnxruntime-web's WASM decoder, which Partsong used
+  before, differed on 29 of them (it has no fused multiply-add), so 13 corpus
+  pages read differently, now as homr reads them. The segmentation and encoder
+  models in onnxruntime-web are still being compared with homr's.
+- **Recognition speed**: the decoder (~340 steps a staff) was most of a page's
+  time; homr-rs's runs in 2.6x (SIMD) to 4x (relaxed SIMD) fewer instructions
+  than onnxruntime-web's. On an Android 10 phone a page went from 40 s to 14 s.
+  The service worker adds COOP/COEP (`credentialless`) headers, which
+  GitHub Pages can't, so the app is cross-origin isolated and onnxruntime-web's
+  WASM runs on 4 threads. The worker logs each page's time per model and in
+  the reader, and each read's total; bug reports include the reader's setup.
+  Measured and rejected: batching staves changes results (the decoder's
+  dynamic quantization scale spans the batch); WebGPU for the decoder is slower.
 - **Models**: ~157 MB, downloaded once on first scan and kept in Cache Storage,
   in 4 MB pieces (HTTP range requests) so a dropped connection resumes rather
   than restarting; a stalled piece is retried.

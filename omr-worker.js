@@ -13,8 +13,7 @@ const MODELS = [
 // Uncompressed total, for progress: servers may gzip, so content-length
 // doesn't match the bytes received.
 const MODELS_TOTAL_BYTES = 157482318;
-// The decoder runs hundreds of tiny steps per staff, where WebGPU's per-call
-// overhead loses to WASM; the big convolutional models gain from the GPU.
+// The big convolutional models gain from the GPU; the decoder runs in homr-rs.
 const GPU_MODELS = new Set([MODELS[0], MODELS[1]]);
 
 let ort;
@@ -155,70 +154,72 @@ async function run(id, feeds, names) {
   return out;
 }
 
-// homr's greedy decoding loop for one staff (homr/transformer/
-// decoder_inference.py ScoreDecoder.generate). Returns, per step, the chosen
-// token of each head (rhythm, pitch, lift, position, articulation, slur) and
-// the attention output; the step whose rhythm is EOS isn't included.
-async function generate(id, context, start, nonote, eos, maxLen, heads, headDim, caches) {
-  const t0 = performance.now();
-  const session = sessions[id];
-  const contextDims = context.dims;
-  // After the first step homr passes only the context's first position.
-  const reduced = new ort.Tensor("float32", context.data.slice(0, contextDims[2]), [contextDims[0], 1, contextDims[2]]);
-  const token = (v) => new ort.Tensor("int64", BigInt64Array.of(BigInt(v)), [1, 1]);
-  const heads6 = ["out_rhythms", "out_pitchs", "out_lifts", "out_positions", "out_articulations", "out_slurs"];
-  const names = [...heads6, "attention", ...Array.from({ length: caches }, (_, i) => `cache_out${i}`)];
-  let cache = Array.from({ length: caches }, () => new ort.Tensor("float32", new Float32Array(0), [1, heads, 0, headDim]));
-  let last = { rhythm: start, pitch: nonote, lift: nonote, articulation: nonote, slur: nonote };
-  const tokens = [];
-  const attention = [];
-  let steps = 0;
-  for (let step = 0; step < maxLen; step++) {
-    const feeds = {
-      rhythms: token(last.rhythm),
-      pitchs: token(last.pitch),
-      lifts: token(last.lift),
-      articulations: token(last.articulation),
-      slurs: token(last.slur),
-      context: step === 0 ? context : reduced,
-      cache_len: new ort.Tensor("int64", BigInt64Array.of(BigInt(step)), [1]),
-    };
-    cache.forEach((t, i) => (feeds[`cache_in${i}`] = t));
-    const out = await session.run(feeds, names);
-    steps++;
-    cache = names.slice(7).map((n) => out[n]);
-    // Greedy: the most likely token at the last position of each head
-    // (the first, on a tie, as numpy's argmax).
-    const pick = (n) => {
-      const t = out[n];
-      const size = t.dims.at(-1);
-      const d = t.data;
-      let best = d.length - size;
-      for (let k = best + 1; k < d.length; k++) if (d[k] > d[best]) best = k;
-      return best - (d.length - size);
-    };
-    const chosen = heads6.map(pick);
-    if (chosen[0] === eos) break;
-    tokens.push(...chosen);
-    attention.push(Float32Array.from(out.attention.data));
-    last = { rhythm: chosen[0], pitch: chosen[1], lift: chosen[2], articulation: chosen[4], slur: chosen[5] };
+// homr's transformer decoder runs in homr-rs (Rust, in its own instance of
+// the reader module, kept for the whole session so the 47 MB model is parsed
+// once): homr's greedy loop (decoder_inference.py ScoreDecoder.generate) with
+// the same results as onnxruntime, without a call per symbol.
+let decoderInstance;
+// A module using relaxed SIMD's i32x4.relaxed_madd... (onnxruntime-web's check).
+const RELAXED_SIMD = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 19, 1, 17, 0, 65, 1, 253, 15, 65, 2, 253, 15, 65, 3, 253, 15, 253, 147, 2, 11]);
+// The relaxed-SIMD build is several times faster, and gives homr's exact
+// results where the browser fuses multiply-adds (as onnxruntime does on ARM);
+// it checks that itself. Otherwise the plain SIMD build, slower but exact.
+async function decoderModule() {
+  if (WebAssembly.validate(RELAXED_SIMD)) {
+    try {
+      const mod = await WebAssembly.compileStreaming(fetch("omr/partsong_omr_fused.wasm" + location.search));
+      const { exports: rs } = await WebAssembly.instantiate(mod, {});
+      if (rs.decoder_fused_simd_supported() === 1) return { rs, build: "relaxed SIMD" };
+    } catch (e) {
+      post({ type: "log", msg: `Relaxed SIMD decoder unavailable (${e.message})` });
+    }
   }
-  const t = (runTimes[id] ??= { calls: 0, ms: 0 });
-  t.calls += steps;
+  const { exports: rs } = await WebAssembly.instantiate(wasmModule, {});
+  return { rs, build: "SIMD" };
+}
+async function rustDecoder() {
+  if (decoderInstance) return decoderInstance;
+  const t0 = performance.now();
+  const { rs, build } = await decoderModule();
+  const bytes = await modelBytes(MODELS[2]);
+  const p = rs.decoder_alloc(bytes.byteLength);
+  new Uint8Array(rs.memory.buffer, p, bytes.byteLength).set(bytes);
+  const model = rs.decoder_load(p, bytes.byteLength);
+  rs.decoder_free(p, bytes.byteLength);
+  if (!model) throw new Error("the music reader couldn't load homr's decoder");
+  const contextBytes = CONTEXT_POSITIONS * DECODER_DIM * 4;
+  decoderInstance = { rs, model, context: rs.decoder_alloc(contextBytes), out: rs.decoder_alloc(MAX_SEQ_LEN * 32) };
+  post({ type: "log", msg: `Loaded ${MODELS[2]} in homr-rs (${build}) in ${Math.round(performance.now() - t0)} ms` });
+  return decoderInstance;
+}
+
+// One staff: per symbol its six tokens (rhythm, pitch, lift, position,
+// articulation, slur) and two attention values; the EOS step left out.
+function decode({ rs, model, context, out }, ctx) {
+  const t0 = performance.now();
+  if (ctx.dims[1] !== CONTEXT_POSITIONS || ctx.dims[2] !== DECODER_DIM) throw new Error(`unexpected encoder output ${ctx.dims}`);
+  new Float32Array(rs.memory.buffer, context, CONTEXT_POSITIONS * DECODER_DIM).set(ctx.data);
+  let n = rs.decoder_run(model, context, out, MAX_SEQ_LEN, 0);
+  if (!n) throw new Error("the music reader's decoder failed");
+  const words = new DataView(rs.memory.buffer, out, n * 32);
+  if (words.getUint32((n - 1) * 32, true) === EOS_TOKEN) n--;
+  const tokens = new Int32Array(n * 6);
+  const attention = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < 6; j++) tokens[i * 6 + j] = words.getUint32(i * 32 + j * 4, true);
+    for (let j = 0; j < 2; j++) attention[i * 2 + j] = words.getFloat32(i * 32 + 24 + j * 4, true);
+  }
+  const t = (runTimes.decoder ??= { calls: 0, ms: 0 });
+  t.calls += n + 1;
   t.ms += performance.now() - t0;
-  const flat = new Float32Array(attention.reduce((n, a) => n + a.length, 0));
-  attention.reduce((at, a) => (flat.set(a, at), at + a.length), 0);
-  return { tokens: Int32Array.from(tokens), attention: flat };
+  return { tokens, attention };
 }
 
 // homr's transformer settings (homr/transformer/configs.py)
-const START_TOKEN = 1;
-const NONOTE_TOKEN = 0;
 const EOS_TOKEN = 2;
 const MAX_SEQ_LEN = 608;
-const DECODER_HEADS = 8;
 const DECODER_DIM = 512;
-const DECODER_DEPTH = 8;
+const CONTEXT_POSITIONS = 1280;
 const SEGNET_BATCH = 8; // homr's batch size (kept: the GPU's results can depend on it)
 const WIN = 320;
 
@@ -287,7 +288,7 @@ async function recognise(imageBytes, systemsJson) {
   rs.dealloc(cp, classes.byteLength);
 
   const encoder = await session(MODELS[1]);
-  const decoder = await session(MODELS[2]);
+  const decoder = await rustDecoder();
   let staff = 0;
   for (;;) {
     const state = rs.page_step();
@@ -301,7 +302,7 @@ async function recognise(imageBytes, systemsJson) {
     const e = sessions[encoder];
     const context = (await run(encoder, { [e.inputNames[0]]: new ort.Tensor("float32", input, [1, 1, h, w]) }, [e.outputNames[0]]))[e.outputNames[0]];
     const ctx = context.location === "cpu" || !context.location ? context : new ort.Tensor("float32", await context.getData(), context.dims);
-    const r = await generate(decoder, ctx, START_TOKEN, NONOTE_TOKEN, EOS_TOKEN, MAX_SEQ_LEN, DECODER_HEADS, DECODER_DIM / DECODER_HEADS, DECODER_DEPTH * 4);
+    const r = decode(decoder, ctx);
     const tp = copyIn(r.tokens);
     const ap = copyIn(r.attention);
     rs.staff_result(tp, r.tokens.length, ap, r.attention.length);
@@ -340,7 +341,8 @@ self.onmessage = async ({ data }) => {
       const ms = Math.round(performance.now() - t0);
       const names = [...sessionIds.keys()];
       const parts = names.map((n) => `${n.split("_")[0]} ${Math.round(runTimes[sessionIds.get(n)]?.ms ?? 0)} ms/${runTimes[sessionIds.get(n)]?.calls ?? 0} calls`);
-      const inModels = runTimes.reduce((sum, t) => sum + (t?.ms ?? 0), 0);
+      if (runTimes.decoder) parts.push(`decoder ${Math.round(runTimes.decoder.ms)} ms/${runTimes.decoder.calls} calls`);
+      const inModels = runTimes.reduce((sum, t) => sum + (t?.ms ?? 0), 0) + (runTimes.decoder?.ms ?? 0);
       post({ type: "log", msg: `Page in ${ms} ms: ${parts.join(", ")}; reader ${Math.round(ms - inModels)} ms` });
       post({ type: "result", id: data.id, xml, ms });
     }

@@ -13,6 +13,10 @@ const $ = (id) => document.getElementById(id);
 // Recent errors and reader log lines, for bug reports.
 const recentErrors = [];
 const readerLog = [];
+// How the reader started (models loaded, which decoder build, threads, GPU
+// fallbacks): kept apart so a long read doesn't push it out of the report.
+const readerSetup = [];
+const SETUP_LOG = /^(Loaded |WASM threads|WebGPU run failed|Relaxed SIMD)/;
 const remember = (list, item, max) => {
   list.push(`${new Date().toISOString().slice(11, 19)} ${item}`);
   if (list.length > max) list.shift();
@@ -104,6 +108,7 @@ const SHOWN_VERSION = /^\d+$/.test(VERSION) ? `v${VERSION}` : VERSION;
 $("header-version").textContent = `beta · ${SHOWN_VERSION}`;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const duration = (secs) => (secs < 60 ? `${secs} s` : `${Math.floor(secs / 60)} min ${secs % 60} s`);
 
 function diagnostics() {
   const screen = ["home", "scan", "practice"].find((s) => !$(s).hidden) || "?";
@@ -128,6 +133,7 @@ function diagnostics() {
   }
   if (screen === "scan") lines.push(`Scan: ${pages.length} pages · status: ${$("status").textContent.replace(/\n/g, " | ")}`);
   if (recentErrors.length) lines.push("", "Recent errors:", ...recentErrors);
+  if (readerSetup.length) lines.push("", "Music reader setup:", ...readerSetup);
   if (readerLog.length) lines.push("", "Music reader log:", ...readerLog.slice(-25));
   return lines.join("\n");
 }
@@ -369,7 +375,7 @@ async function renderLibrary() {
         const marked = Object.keys(entry.manual ?? {}).length;
         const info = entry.pending
           ? `Reading… ${done} of ${n}`
-          : `${n} page${n > 1 ? "s" : ""}${marked ? ` · ${marked} system${marked > 1 ? "s" : ""} marked` : ""}`;
+          : `${n} page${n > 1 ? "s" : ""}${marked ? ` · ${marked} system${marked > 1 ? "s" : ""} marked` : ""}${entry.readSeconds ? ` · read in ${duration(entry.readSeconds)}` : ""}`;
         b.innerHTML = `<span class="thumb"></span><span class="meta"><span class="name"></span><small>${info}</small></span>`;
         b.querySelector(".name").textContent = (entry.locked ? "🔒 " : "") + entry.title;
         if (entry.images?.length) {
@@ -437,7 +443,8 @@ function startWorker() {
         resolve();
       } else if (data.type === "log") {
         console.log("[omr]", data.msg);
-        remember(readerLog, String(data.msg).slice(0, 200), 40);
+        if (SETUP_LOG.test(data.msg)) remember(readerSetup, String(data.msg).slice(0, 200), 10);
+        else remember(readerLog, String(data.msg).slice(0, 200), 40);
         const m = /Running TrOmr inference on staff image (\d+)/.exec(data.msg);
         if (m) setPageStatus(`reading staff ${Number(m[1]) + 1}`);
         else if (/Found the staffs/.test(data.msg)) setPageStatus("found the staves");
@@ -487,6 +494,7 @@ function setPageStatus(s) {
 let scanId = null;
 let scanCreated = null;
 let reading = false;
+let readSeconds = null; // how long the last whole read took
 let rereading = false; // reading a saved score's photos again: keep the old music until done
 
 let scanSettings = {}; // settings to save with the scan (the sample's)
@@ -735,6 +743,7 @@ async function readScan() {
   if (reading) return;
   reading = true;
   $("recognise").textContent = "Stop reading";
+  $("read-hint").hidden = false;
   const stopped = new Promise((_, reject) => {
     stopReading = () => {
       reject(new Stopped());
@@ -752,6 +761,8 @@ async function readScan() {
     startWorker();
     await Promise.race([workerReady, stopped]);
     const t0 = performance.now();
+    // Only a read of every page gives the time a whole score takes.
+    const fresh = pages.every((p) => !p.xml);
     for (let i = 0; i < pages.length; i++) {
       if (pages[i].xml) continue;
       pageLabel = `Page ${i + 1} of ${pages.length}`;
@@ -776,7 +787,10 @@ async function readScan() {
       if (saved) await db.update(scanId, { images: pages.map((p) => p.blob), pages: pages.map((p) => p.xml ?? null), resumes: 0 }).catch(() => {});
     }
     pageLabel = "";
-    setPageStatus(`Done in ${Math.round((performance.now() - t0) / 1000)} s`);
+    const secs = Math.round((performance.now() - t0) / 1000);
+    readSeconds = fresh ? secs : null;
+    remember(readerLog, `Read ${plural(pages.length, "page")} in ${duration(secs)}${fresh ? "" : " (carried on from an earlier read)"}`, 40);
+    setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${pages.length} page${pages.length === 1 ? "" : "s"}`);
   } catch (e) {
     pageLabel = "";
@@ -803,11 +817,13 @@ async function readScan() {
   } finally {
     reading = false;
     stopReading = null;
+    $("read-hint").hidden = true;
     $("recognise").textContent = "Read music";
     $("recognise").disabled = pages.length === 0;
     release();
   }
   const entry = scanEntry(false);
+  if (readSeconds) entry.readSeconds = readSeconds;
   saved = await db.put(entry).then(() => true, () => false);
   if (!saved) setPageStatus("Read OK, but couldn't save it on this phone (storage full?).");
   scanId = null;

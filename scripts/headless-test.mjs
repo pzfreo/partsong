@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 const [url, out, timeoutSec = "900", driveFile, shotPrefix] = process.argv.slice(2);
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const port = 9333;
+const port = +(process.env.CDP_PORT || 9333);
 const chrome = spawn(CHROME, [
   "--headless=new",
   `--remote-debugging-port=${port}`,

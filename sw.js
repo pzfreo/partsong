@@ -20,6 +20,7 @@ const SHELL_FILES = [
   "styles.css",
   "omr-worker.js",
   "omr/partsong_omr.wasm",
+  "omr/partsong_omr_fused.wasm",
   "manifest.webmanifest",
   "icon.svg",
   "icon-192.png",
