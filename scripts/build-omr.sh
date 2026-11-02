@@ -22,5 +22,5 @@ for v in threads:+simd128 threads_fused:+simd128,+relaxed-simd; do
 done
 # homr-rs's host side of the worker pool, from the same revision.
 homr=$(dirname "$(cargo metadata --format-version 1 | python3 -c 'import json,sys; print(next(p["manifest_path"] for p in json.load(sys.stdin)["packages"] if p["name"]=="homr-rs"))')")
-cp "$homr/tools/encoder_pool.mjs" "$homr/tools/encoder_worker.mjs" ../omr/
+cp "$homr/tools/encoder_pool.mjs" "$homr/tools/encoder_worker.mjs" "$homr/tools/encoder_gpu.mjs" "$homr/tools/encoder_gpu_math.mjs" "$homr/tools/encoder_gpu_kernels.mjs" ../omr/
 ls -l ../omr/*.wasm

@@ -16,7 +16,7 @@ const readerLog = [];
 // How the reader started (models loaded, which decoder build, threads, GPU
 // fallbacks): kept apart so a long read doesn't push it out of the report.
 const readerSetup = [];
-const SETUP_LOG = /^(Loaded |WASM threads|WebGPU run failed|Relaxed SIMD|Tuned |Tuning )/;
+const SETUP_LOG = /^(Loaded |WASM threads|WebGPU run failed|Relaxed SIMD|Tuned |Tuning |Exact encoder )/;
 const remember = (list, item, max) => {
   list.push(`${new Date().toISOString().slice(11, 19)} ${item}`);
   if (list.length > max) list.shift();

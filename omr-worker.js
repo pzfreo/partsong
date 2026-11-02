@@ -24,6 +24,7 @@ const sessionNames = []; // id -> model name
 const onGpu = new Set(); // ids of sessions created on WebGPU
 const sessionIds = new Map();
 let useGpu = false;
+let noGpuSetting = false; // init(noGpu): every model on WASM, the exact encoder on the CPU
 
 // Models download in 4 MB pieces (HTTP range requests), each stored as it
 // arrives, so a dropped or crawling connection resumes where it stopped (even
@@ -294,6 +295,26 @@ async function rustDecoder() {
     if (!decoderInstance.encoder) throw new Error("the music reader couldn't load homr's encoder");
     decoderInstance.image = rs.decoder_alloc(IMAGE_VALUES * 4);
     post({ type: "log", msg: `Loaded ${MODELS[1]} in homr-rs (${build}, exact) in ${Math.round(performance.now() - t1)} ms` });
+    // The same encoder on the GPU, with the same results: it tests itself
+    // first and otherwise (or if a staff trips its checks) uses the CPU one.
+    if (self.navigator.gpu && !noGpuSetting) {
+      const t2 = performance.now();
+      try {
+        const { EncoderGPU } = await import("./omr/encoder_gpu.mjs");
+        const gpu = await EncoderGPU.create({ exports: rs, encoder: decoderInstance.encoder });
+        const st = gpu.status;
+        if (st.backend === "gpu") decoderInstance.gpu = gpu;
+        else gpu.destroy();
+        post({
+          type: "log",
+          msg: st.backend === "gpu"
+            ? `Exact encoder on WebGPU: self-test passed, ready in ${Math.round(performance.now() - t2)} ms`
+            : `Exact encoder on WebGPU unavailable (${String(st.reason ?? "self-test failed").slice(0, 120)}); using the CPU`,
+        });
+      } catch (e) {
+        post({ type: "log", msg: `Exact encoder on WebGPU unavailable (${e.message}); using the CPU` });
+      }
+    }
   }
   return decoderInstance;
 }
@@ -309,11 +330,15 @@ function decode({ rs, model, context, out }, ctx) {
 
 // The exact path: encoder and decoder both in homr-rs, the context never
 // leaving its memory.
-function encodeDecode({ rs, model, encoder, image, out }, input) {
+async function encodeDecode({ rs, model, encoder, image, context, out, gpu }, input) {
   const t0 = performance.now();
   if (input.length !== IMAGE_VALUES) throw new Error(`unexpected staff image size ${input.length}`);
   new Float32Array(rs.memory.buffer, image, IMAGE_VALUES).set(input);
-  return steps(rs, out, rs.encoder_decode(encoder, model, image, out, MAX_SEQ_LEN), t0);
+  if (!gpu) return steps(rs, out, rs.encoder_decode(encoder, model, image, out, MAX_SEQ_LEN), t0);
+  const r = await gpu.encode(image, context);
+  if (r.backend !== "gpu") runTimes.gpuFallbacks = (runTimes.gpuFallbacks ?? 0) + 1;
+  runTimes.encoderMs = (runTimes.encoderMs ?? 0) + performance.now() - t0;
+  return steps(rs, out, rs.decoder_run(model, context, out, MAX_SEQ_LEN, 0), t0);
 }
 
 function steps(rs, out, n, t0) {
@@ -417,7 +442,7 @@ async function recognise(imageBytes, systemsJson) {
     const w = rs.staff_input_w();
     const input = new Float32Array(mem(), rs.buf_ptr(), h * w).slice();
     let r;
-    if (exactEncoder) r = encodeDecode(decoder, input);
+    if (exactEncoder) r = await encodeDecode(decoder, input);
     else {
       const e = sessions[encoder];
       const context = (await run(encoder, { [e.inputNames[0]]: new ort.Tensor("float32", input, [1, 1, h, w]) }, [e.outputNames[0]]))[e.outputNames[0]];
@@ -434,6 +459,7 @@ async function recognise(imageBytes, systemsJson) {
 
 // noGpu (tests, comparisons): run every model on WASM.
 async function init(noGpu, exact) {
+  noGpuSetting = noGpu;
   exactEncoder = !!exact;
   ort = await import(ORT_URL + "ort.webgpu.min.mjs");
   ort.env.wasm.wasmPaths = ORT_URL;
@@ -476,7 +502,10 @@ self.onmessage = async ({ data }) => {
       const ms = Math.round(performance.now() - t0);
       const names = [...sessionIds.keys()];
       const parts = names.map((n) => `${n.split("_")[0]} ${Math.round(runTimes[sessionIds.get(n)]?.ms ?? 0)} ms/${runTimes[sessionIds.get(n)]?.calls ?? 0} calls`);
-      if (runTimes.decoder) parts.push(`${exactEncoder ? "encoder+decoder (homr-rs, exact)" : "decoder"} ${Math.round(runTimes.decoder.ms)} ms/${runTimes.decoder.calls} calls`);
+      const exactLabel = `encoder+decoder (homr-rs, exact${decoderInstance?.gpu ? ", GPU encoder" : ""})`;
+      if (runTimes.decoder) parts.push(`${exactEncoder ? exactLabel : "decoder"} ${Math.round(runTimes.decoder.ms)} ms/${runTimes.decoder.calls} calls`);
+      if (runTimes.encoderMs) parts.push(`of which GPU encoder ${Math.round(runTimes.encoderMs)} ms`);
+      if (runTimes.gpuFallbacks) parts.push(`${runTimes.gpuFallbacks} staffs on the CPU encoder after GPU checks`);
       const inModels = runTimes.reduce((sum, t) => sum + (t?.ms ?? 0), 0) + (runTimes.decoder?.ms ?? 0);
       post({ type: "log", msg: `Page in ${ms} ms: ${parts.join(", ")}; reader ${Math.round(ms - inModels)} ms` });
       post({ type: "result", id: data.id, xml, ms });
