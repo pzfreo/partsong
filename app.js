@@ -133,7 +133,7 @@ function diagnostics() {
   }
   if (screen === "scan") lines.push(`Scan: ${pages.length} pages · status: ${$("status").textContent.replace(/\n/g, " | ")}`);
   if (recentErrors.length) lines.push("", "Recent errors:", ...recentErrors);
-  const setup = [...(tunedResult() ? [`Tuned encoder threads (saved): ${tunedResult()}`] : []), ...readerSetup];
+  const setup = [...(tunedResult() ? [`Tuned encoder (saved): ${tunedResult()}`] : []), ...readerSetup];
   if (setup.length) lines.push("", "Music reader setup:", ...setup);
   if (readerLog.length) lines.push("", "Music reader log:", ...readerLog.slice(-25));
   return lines.join("\n");
@@ -448,7 +448,7 @@ function startWorker() {
       } else if (data.type === "tuned") {
         if (data.threads) {
           try {
-            localStorage.setItem(TUNED_THREADS, JSON.stringify({ threads: data.threads, ms: data.ms }));
+            localStorage.setItem(TUNED_THREADS, JSON.stringify({ threads: data.threads, gpu: data.gpu, ms: data.ms }));
           } catch {}
         } else if (data.error) {
           remember(readerSetup, `Tuning failed: ${data.error}`.slice(0, 200), 10);
@@ -481,12 +481,12 @@ function startWorker() {
       reject(err);
     };
   });
-  worker.postMessage({ type: "init", exact: exactEncoder(), threads: tunedThreads() });
+  worker.postMessage({ type: "init", exact: exactEncoder(), threads: tunedThreads(), gpu: tunedGpu() });
 }
 
 // The exact encoder's thread count, measured once on this device (see tune()
 // in omr-worker.js). Bump the key when the encoder's threading changes.
-const TUNED_THREADS = "partsong-encoder-threads-v1";
+const TUNED_THREADS = "partsong-encoder-threads-v2"; // v2: also times the GPU encoder
 let tuned;
 function tunedThreads() {
   try {
@@ -499,10 +499,18 @@ function tunedThreads() {
     return undefined;
   }
 }
+function tunedGpu() {
+  try {
+    const t = JSON.parse(localStorage.getItem(TUNED_THREADS));
+    return typeof t?.gpu === "boolean" ? t.gpu : undefined;
+  } catch {
+    return undefined;
+  }
+}
 function tunedResult() {
   try {
     const t = JSON.parse(localStorage.getItem(TUNED_THREADS));
-    return t && `${t.threads} (${Object.entries(t.ms ?? {}).map(([n, ms]) => `${n}: ${ms} ms`).join(" · ")})`;
+    return t && `${t.gpu ? "GPU" : `${t.threads} threads`} (${Object.entries(t.ms ?? {}).map(([n, ms]) => `${n}: ${ms ?? "unavailable"}${ms == null ? "" : " ms"}`).join(" · ")})`;
   } catch {
     return "";
   }

@@ -197,6 +197,7 @@ async function decoderModule() {
 }
 // The exact encoder's thread count: from the app (tuned once on this device).
 let encoderThreads;
+let encoderGpu; // from tune(): true/false; undefined (not tuned) tries the GPU
 let tuning;
 
 // Times the exact encoder at each thread count this device could use, twice
@@ -246,9 +247,43 @@ async function tune() {
   }
   const best = Math.min(...Object.values(ms));
   const threads = counts.find((n) => ms[n] <= best * 1.1);
-  const times = counts.map((n) => `${n}: ${ms[n]} ms`).join(" · ");
-  post({ type: "log", msg: `Tuned encoder threads: ${threads} (${fused ? "relaxed SIMD" : "SIMD"}; ${times})` });
-  return { threads, ms };
+  // The same encoder on the GPU (same results), if it passes its self-test:
+  // used only where it beats the CPU (an Android phone's GPU took 1.5 s a
+  // staff against 1.1 s on 3 threads).
+  let gpuMs = null;
+  if (self.navigator.gpu && !noGpuSetting) {
+    const pool = await EncoderPool.create(mod, { threads });
+    let gpu;
+    try {
+      const e = pool.exports;
+      const p = e.decoder_alloc(bytes.byteLength);
+      new Uint8Array(e.memory.buffer, p, bytes.byteLength).set(bytes);
+      const encoder = e.encoder_load(p, bytes.byteLength);
+      e.decoder_free(p, bytes.byteLength);
+      const img = e.decoder_alloc(IMAGE_VALUES * 4);
+      const ctx = e.decoder_alloc(CONTEXT_POSITIONS * DECODER_DIM * 4);
+      new Float32Array(e.memory.buffer, img, IMAGE_VALUES).set(image);
+      const { EncoderGPU } = await import("./omr/encoder_gpu.mjs");
+      gpu = await EncoderGPU.create({ exports: e, encoder });
+      if (gpu.status.backend === "gpu") {
+        await gpu.encode(img, ctx); // warm-up
+        for (let i = 0; i < 2; i++) {
+          const t0 = performance.now();
+          const r = await gpu.encode(img, ctx);
+          if (r.backend === "gpu") gpuMs = Math.min(gpuMs ?? Infinity, Math.round(performance.now() - t0));
+        }
+      }
+    } catch (e) {
+      post({ type: "log", msg: `Tuning: the GPU encoder failed (${e.message})` });
+    } finally {
+      gpu?.destroy();
+      await pool.close();
+    }
+  }
+  const useGpu = gpuMs != null && gpuMs < ms[threads] * 0.9;
+  const times = counts.map((n) => `${n}: ${ms[n]} ms`).join(" · ") + ` · GPU: ${gpuMs == null ? "unavailable" : gpuMs + " ms"}`;
+  post({ type: "log", msg: `Tuned encoder: ${useGpu ? "GPU" : `${threads} threads`} (${fused ? "relaxed SIMD" : "SIMD"}; ${times})` });
+  return { threads, gpu: useGpu, ms: { ...ms, gpu: gpuMs } };
 }
 
 async function threadedModule(threads) {
@@ -297,7 +332,7 @@ async function rustDecoder() {
     post({ type: "log", msg: `Loaded ${MODELS[1]} in homr-rs (${build}, exact) in ${Math.round(performance.now() - t1)} ms` });
     // The same encoder on the GPU, with the same results: it tests itself
     // first and otherwise (or if a staff trips its checks) uses the CPU one.
-    if (self.navigator.gpu && !noGpuSetting) {
+    if (self.navigator.gpu && !noGpuSetting && encoderGpu !== false) {
       const t2 = performance.now();
       try {
         const { EncoderGPU } = await import("./omr/encoder_gpu.mjs");
@@ -481,6 +516,7 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
       if (Number.isInteger(data.threads) && data.threads > 0) encoderThreads = data.threads;
+      if (typeof data.gpu === "boolean") encoderGpu = data.gpu;
       ready ??= init(!!data.noGpu, !!data.exact);
       await ready;
     } else if (data.type === "tune") {
@@ -488,6 +524,7 @@ self.onmessage = async ({ data }) => {
       tuning = tune().then(
         (r) => {
           if (r.threads) encoderThreads = r.threads;
+          if (r.threads) encoderGpu = r.gpu;
           post({ type: "tuned", ...r });
         },
         (e) => post({ type: "tuned", threads: null, error: String(e && e.message ? e.message : e) }),
