@@ -1564,7 +1564,7 @@ function renderPartChoice() {
   $("auto-part").hidden = marked > 0;
   $("marked-part").hidden = marked === 0;
   $("marked-count").textContent = `${marked} of ${score.systems.length} systems`;
-  $("tap-hint").textContent = fixing ? "Numbered boxes show how Partsong grouped each page's staves. Where a system is split or merged, tap its top staff, then its bottom staff." : marking ? "Tap the staff you sing in each system." : "Tap a bar to start from there.";
+  $("tap-hint").textContent = fixing ? "Red lines are where Partsong thinks one system ends and the next begins. Tap between two staves to add or remove a line." : marking ? "Tap the staff you sing in each system." : "Tap a bar to start from there.";
 }
 
 // The sound is a preference for this device, not part of a score.
@@ -1657,74 +1657,92 @@ function endMarkup(nav = true) {
 }
 $("markup-done").onclick = () => endMarkup();
 
-// ---------- Fix systems: say which staves are read together on a page ----------
-// For pages the reader grouped wrongly (parts then play out of step): bands
-// over the photo, one per system, from a tap on its top staff and one on its
-// bottom staff. They're kept with the score (systemHints: page -> [top,
-// bottom] in photo coordinates) and those pages are read again with them.
+// ---------- Check and fix systems: where one system ends and the next begins ----------
+// For pages the reader grouped wrongly (parts then play out of step). Each
+// page shows its staves' gaps: a red line where Partsong ends a system, a
+// dotted one inside a system; a tap switches the nearest gap. Changed pages
+// are read again with those systems, kept with the score (systemHints: page
+// -> [top, bottom] ranges in photo coordinates, one per system).
 
-let fixDraft = {};
-let fixPending = null; // { page, y }: first tap of a band
+let fixDraft = {}; // page -> { rows: [{ y0, y1 }], splits: [bool per gap], initial }
+
+// A page's staves top to bottom, one per row (a row the reader split across
+// two systems side by side counts once), and whether the reader starts a new
+// system at each gap between them.
+function pageRows(page) {
+  const staves = score.systems
+    .filter((sys) => sys.page === page)
+    .flatMap((sys) => sys.staves.filter((st) => Number.isFinite(st.y0) && Number.isFinite(st.y1)).map((st) => ({ y0: st.y0, y1: st.y1, sys: sys.index })))
+    .sort((a, b) => a.y0 - b.y0);
+  const rows = [];
+  for (const st of staves) {
+    const last = rows.at(-1);
+    const mid = (st.y0 + st.y1) / 2;
+    if (last && mid < last.y1) {
+      last.y1 = Math.max(last.y1, st.y1);
+      last.systems.add(st.sys);
+    } else rows.push({ y0: st.y0, y1: st.y1, systems: new Set([st.sys]) });
+  }
+  const splits = rows.slice(1).map((row, i) => ![...row.systems].some((s) => rows[i].systems.has(s)));
+  return { rows: rows.map(({ y0, y1 }) => ({ y0, y1 })), splits, initial: splits.slice() };
+}
 
 function startFix() {
-  fixDraft = structuredClone(current.systemHints ?? {});
-  fixPending = null;
+  fixDraft = {};
+  for (let p = 0; p < pageViews.length; p++) fixDraft[p] = pageRows(p);
   renderFix();
 }
 
 function fixTap(page, e) {
-  const { view, y } = tapPoint(page, e);
-  const bands = (fixDraft[page] ??= []);
-  const hit = bands.findIndex(([top, bottom]) => top <= y && y <= bottom);
-  if (hit >= 0) bands.splice(hit, 1);
-  else if (fixPending?.page === page) {
-    const pad = view.h * 0.015; // the taps are on staves: take them in whole
-    bands.push([Math.min(fixPending.y, y) - pad, Math.max(fixPending.y, y) + pad]);
-    bands.sort((a, b) => a[0] - b[0]);
-    fixPending = null;
-  } else fixPending = { page, y };
+  const { y } = tapPoint(page, e);
+  const d = fixDraft[page];
+  if (!d?.splits.length) return;
+  const gap = (i) => (d.rows[i].y1 + d.rows[i + 1].y0) / 2;
+  let nearest = 0;
+  for (let i = 1; i < d.splits.length; i++) if (Math.abs(gap(i) - y) < Math.abs(gap(nearest) - y)) nearest = i;
+  d.splits[nearest] = !d.splits[nearest];
   renderFix();
+}
+
+// The systems a page's splits make, as y ranges reaching halfway to the
+// neighbouring staves (the reader puts a staff in the range its middle is in).
+function fixBands(d, h) {
+  const bands = [];
+  let start = 0;
+  for (let i = 0; i < d.rows.length; i++) {
+    if (i < d.splits.length && !d.splits[i]) continue;
+    const top = start > 0 ? (d.rows[start - 1].y1 + d.rows[start].y0) / 2 : d.rows[start].y0 - h * 0.015;
+    const bottom = i + 1 < d.rows.length ? (d.rows[i].y1 + d.rows[i + 1].y0) / 2 : d.rows[i].y1 + h * 0.015;
+    bands.push([top, bottom]);
+    start = i + 1;
+  }
+  return bands;
 }
 
 function renderFix() {
   for (const [p, view] of pageViews.entries()) {
     view.fix.replaceChildren();
-    if (!fixing || !view.w) continue;
-    const rect = (cls, x, y, w, h) => {
-      const r = document.createElementNS(SVG, "rect");
-      for (const [k, v] of Object.entries({ class: cls, x, y, width: w, height: h, rx: view.w * 0.006 })) r.setAttribute(k, v);
-      view.fix.append(r);
-    };
-    // Across the whole page: only which staves are grouped together matters
-    // here (a box round the notes read stops short where a bar wasn't).
-    const read = score.systems.filter((sys) => sys.page === p && sys.box && sys.staves.length);
-    read.forEach((sys, i) => {
-      const y0 = Math.min(...sys.staves.map((st) => st.y0)) - view.h * 0.01;
-      const y1 = Math.max(...sys.staves.map((st) => st.y1)) + view.h * 0.01;
-      const alt = i % 2 ? " alt" : "";
-      rect("fix-current" + alt, view.w * 0.03, y0, view.w * 0.94, y1 - y0);
-      const label = document.createElementNS(SVG, "text");
-      for (const [k, v] of Object.entries({ class: "fix-label" + alt, x: view.w * 0.04, y: y0 + view.w * 0.045, "font-size": view.w * 0.04 })) label.setAttribute(k, v);
-      label.textContent = String(i + 1);
-      view.fix.append(label);
-    });
-    for (const [top, bottom] of fixDraft[p] ?? []) rect("fix-band", view.w * 0.02, top, view.w * 0.96, bottom - top);
-    if (fixPending?.page === p) {
+    const d = fixDraft[p];
+    if (!fixing || !view.w || !d) continue;
+    d.splits.forEach((split, i) => {
+      const y = (d.rows[i].y1 + d.rows[i + 1].y0) / 2;
       const line = document.createElementNS(SVG, "line");
-      for (const [k, v] of Object.entries({ class: "fix-pending", x1: view.w * 0.02, x2: view.w * 0.98, y1: fixPending.y, y2: fixPending.y })) line.setAttribute(k, v);
+      for (const [k, v] of Object.entries({ class: split ? "fix-split" : "fix-gap", x1: view.w * 0.02, x2: view.w * 0.98, y1: y, y2: y })) line.setAttribute(k, v);
       view.fix.append(line);
-    }
+    });
   }
 }
 
 $("start-fix").onclick = () => startMarkup("systems");
 $("fix-cancel").onclick = () => endMarkup();
 $("fix-done").onclick = () => {
-  const hints = Object.fromEntries(Object.entries(fixDraft).filter(([, bands]) => bands.length));
-  const saved = current.systemHints ?? {};
-  // Pages with bands, and pages whose bands were all removed.
-  const changed = (current.images ?? []).map((_, i) => i).filter((i) => hints[i] || saved[i]?.length);
+  // Pages whose splits were changed; the others keep how they were read.
+  const changed = Object.entries(fixDraft)
+    .filter(([, d]) => d.splits.some((x, i) => x !== d.initial[i]))
+    .map(([p]) => Number(p));
   if (!changed.length || reading) return endMarkup();
+  const hints = { ...(current.systemHints ?? {}) };
+  for (const p of changed) hints[p] = fixBands(fixDraft[p], pageViews[p].h);
   // Stay on this history entry (going back here would land after the reading
   // screen opens and close it).
   history.replaceState({ screen: "practice" }, "");

@@ -1,6 +1,6 @@
-// Fix systems: on a page the reader grouped wrongly, tap the top and bottom
-// staff of each system; Read again reads that page (only) with those systems,
-// and the bands are kept with the score. Uses ?fixpdf= (default: There was a
+// Check and fix systems: on a page the reader grouped wrongly, tap the gaps
+// between staves to add or remove splits until they match the systems below;
+// Read again reads that page (only) with those systems, kept with the score. Uses ?fixpdf= (default: There was a
 // tree, page 1, whose piano the reader leaves out of the choir's systems).
 // Run against http://localhost:8765/index.html.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,12 +29,16 @@ const tap = (y) => {
   const rc = svg.getBoundingClientRect();
   svg.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: rc.left + 0.5 * rc.width, clientY: rc.top + (y / h) * rc.height }));
 };
-// Top and bottom staff of each system on page 1 (photo coordinates).
+// The systems page 1 should have (photo y ranges): a gap is a split when it
+// falls between two of them, and is tapped where the page shows otherwise.
 const bands = JSON.parse(new URLSearchParams(location.search).get("bands") || "[[605,1380],[1720,2050],[2390,2870]]");
-for (const [top, bottom] of bands) { tap(top); tap(bottom); }
+const inside = (y) => bands.some(([top, bottom]) => top < y && y < bottom);
+const gaps = () => [...svg.querySelectorAll("line.fix-split, line.fix-gap")].map((l) => ({ y: +l.getAttribute("y1"), split: l.classList.contains("fix-split") }));
+r.gapsBefore = gaps().map((g) => (g.split ? "|" : ".")).join("");
+for (const g of gaps()) if (g.split === inside(g.y)) tap(g.y);
 await sleep(200);
-r.bands = svg.querySelectorAll("rect.fix-band").length;
-r.outlines = svg.querySelectorAll("rect.fix-current").length;
+r.gapsAfter = gaps().map((g) => (g.split ? "|" : ".")).join("");
+r.wanted = gaps().map((g) => (inside(g.y) ? "." : "|")).join("");
 await shot(false);
 $("fix-done").click();
 await waitFor(() => !$("scan").hidden, 5000, "reading");
@@ -50,10 +54,9 @@ r.hints = entry.systemHints && Object.keys(entry.systemHints);
 r.otherPagesKept = entry.pages.slice(1).every((x, i) => x === r.pagesBefore[i + 1]);
 r.page1Changed = entry.pages[0] !== r.pagesBefore[0];
 delete r.pagesBefore;
-// Read again with the same bands still reads those pages again.
+// Read again with nothing changed closes without reading.
 $("start-fix").click();
 await sleep(300);
 $("fix-done").click();
-r.againStarted = await waitFor(() => !$("scan").hidden, 5000, "reading again").then(() => true, () => false);
-await waitFor(() => !$("practice").hidden, 900000, "read again (same bands)");
+r.unchangedStartedReading = await waitFor(() => !$("scan").hidden, 3000, "reading").then(() => true, () => false);
 window.result = r;

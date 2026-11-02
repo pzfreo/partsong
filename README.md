@@ -70,8 +70,10 @@ then *Add to Home screen*.
   sung lines), the panel shows the two manual steps instead: check and fix
   systems, then mark your part; the list stays behind "Show the N parts it found".
 - **Check and fix systems**: where the reader groups a page's staves into systems wrongly
-  (parts then play out of step), tap the top and bottom staff of each system to
-  make a band (the systems as read are numbered boxes in alternating colours); Read again reads those pages with each band's staves as one
+  (parts then play out of step), each gap between staves shows a red line where
+  Partsong ends a system and a dotted one inside a system; a tap switches the
+  nearest gap. The changed pages' systems become bands (each reaching halfway
+  to the neighbouring staves); Read again reads those pages with each band's staves as one
   system (`systems` in the worker's recognise message; `omr-rs/src/layout.rs`). The bands are
   kept with the score (`systemHints`) and used by later Read agains
   (`tests/drive-fix-systems.js`).
