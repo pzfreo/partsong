@@ -440,6 +440,9 @@ function startWorker() {
         setEngineStatus(`${engineStatus.split(" · ")[0]} · connection dropped, retrying (${data.attempt})…`);
       } else if (data.type === "ready") {
         setEngineStatus("");
+        try {
+          localStorage.setItem(READER_FETCHED, "1");
+        } catch {}
         resolve();
       } else if (data.type === "log") {
         console.log("[omr]", data.msg);
@@ -475,6 +478,30 @@ function resetWorker() {
   worker?.terminate();
   worker = null;
   download.clear();
+}
+
+// The music reader's models (157 MB, once) download in the background soon
+// after the app opens, so the first scan doesn't wait for them. Not on mobile
+// data or data saver where the phone says so (Android Chrome); not again once
+// done. Afterwards the reader is closed unless a scan is using it.
+const READER_FETCHED = "partsong-reader-fetched";
+function prefetchReader() {
+  try {
+    if (localStorage.getItem(READER_FETCHED)) return;
+  } catch {}
+  const c = navigator.connection;
+  if (c?.saveData || c?.type === "cellular") return;
+  setTimeout(() => {
+    if (worker) return; // a scan has started it already
+    startWorker();
+    const started = worker;
+    workerReady.then(
+      () => {
+        if (worker === started && !reading && $("scan").hidden) resetWorker();
+      },
+      () => {},
+    );
+  }, 3000);
 }
 
 let engineStatus = "";
@@ -2196,6 +2223,7 @@ if (location.hash.startsWith("#s=")) {
   // A share whose launch never finished (e.g. stuck offline) is still waiting.
   renderLibrary().then(async () => ((await (await caches.open("partscanner-inbox")).keys()).length ? openInbox() : resumeUnfinished()));
 }
+prefetchReader();
 
 // PDFs opened with Partsong from the system's "Open with" (manifest
 // file_handlers: desktop Chrome/Edge, and Android where Chrome supports it):
