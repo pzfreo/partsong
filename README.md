@@ -66,9 +66,12 @@ then *Add to Home screen*.
   an octave (homr doesn't know the tenor clef's octave). Each staff's outline
   (from homr's staff detection, written on every note and rest) places it, so
   a staff that only rests can still be marked (`tests/drive-mark-every-staff.js`).
-- **Fix systems**: where the reader groups a page's staves into systems wrongly
+  When the list of parts is clearly wrong (a part's name twice, or more than 8
+  sung lines), the panel shows the two manual steps instead: check and fix
+  systems, then mark your part; the list stays behind "Show the N parts it found".
+- **Check and fix systems**: where the reader groups a page's staves into systems wrongly
   (parts then play out of step), tap the top and bottom staff of each system to
-  make a band; Read again reads those pages with each band's staves as one
+  make a band (the systems as read are numbered boxes in alternating colours); Read again reads those pages with each band's staves as one
   system (`systems` in the worker's recognise message; `omr-rs/src/layout.rs`). The bands are
   kept with the score (`systemHints`) and used by later Read agains
   (`tests/drive-fix-systems.js`).

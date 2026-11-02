@@ -187,9 +187,19 @@ body.marking .transport { display: none; }
 select { min-height: 40px; font: inherit; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
 .link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; font-weight: 400; }
 .photo-list .mark { fill: var(--gold); fill-opacity: 0.16; stroke: var(--gold); stroke-opacity: 0.6; stroke-width: 4; }
-.photo-list .fix-current { fill: none; stroke: var(--muted); stroke-opacity: 0.6; stroke-width: 3; stroke-dasharray: 12 8; }
-.photo-list .fix-band { fill: var(--accent); fill-opacity: 0.12; stroke: var(--accent); stroke-opacity: 0.7; stroke-width: 4; }
-.photo-list .fix-pending { stroke: var(--accent); stroke-width: 5; stroke-dasharray: 16 10; }
+/* Fix systems: the systems as read, numbered in alternating colours so a
+   wrong grouping stands out; the bands you draw in green. */
+.photo-list .fix-current { stroke-width: 7; stroke: #e2432d; fill: #ff6a55; fill-opacity: 0.1; }
+.photo-list .fix-current.alt { stroke: #2b2870; fill: #2b2870; fill-opacity: 0.08; }
+.photo-list .fix-label { fill: #e2432d; font-family: "Plus Jakarta Sans", system-ui, sans-serif; font-weight: 700; }
+.photo-list .fix-label.alt { fill: #2b2870; }
+.photo-list .fix-band { fill: #1f9d55; fill-opacity: 0.18; stroke: #1f9d55; stroke-width: 9; }
+.photo-list .fix-pending { stroke: #1f9d55; stroke-width: 10; }
+.parts-doubt { border: 1px solid var(--border); border-left: 4px solid var(--gold); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
+.parts-doubt p { margin: 0 0 8px; }
+.parts-doubt .doubt-title { font-weight: 700; margin-bottom: 6px; }
+.parts-doubt .doubt-step { font-weight: 600; margin: 6px 0 4px; }
+.parts-doubt button { width: 100%; margin-bottom: 8px; }
 .photo-list .mark-label { fill: #a8690f; font-family: "Plus Jakarta Sans", system-ui, sans-serif; font-weight: 700; }
 .lines { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
 .lines li {

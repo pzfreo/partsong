@@ -200,9 +200,24 @@
         <h2>Your part <button class="q" aria-controls="part-help" aria-expanded="false" aria-label="About choosing your part">?</button></h2>
         <p id="part-help" class="hint" hidden>Marking works for any score: tap the staff you sing in each system. Picking from the list is quicker if your part stays on the same staff throughout.</p>
         <div id="auto-part">
-          <button id="start-markup">Mark your part on the music</button>
-          <p class="hint">Or pick it:</p>
-          <ul id="lines" class="lines"></ul>
+          <div id="parts-doubt" class="parts-doubt" hidden>
+            <p class="doubt-title">Partsong couldn't sort out the parts in this score</p>
+            <p class="hint" id="doubt-intro">Its layout changes from page to page. Two steps get you your part exactly:</p>
+            <div id="doubt-fix-step">
+              <p class="doubt-step">1. Check the systems</p>
+              <p class="hint">Where a system's staves aren't grouped together, tap its top and bottom staff.</p>
+              <button id="doubt-fix">Check and fix systems</button>
+            </div>
+            <p class="doubt-step" id="doubt-mark-title">2. Mark your part</p>
+            <p class="hint">Tap the staff you sing in each system.</p>
+            <button id="doubt-mark" class="primary">Mark your part on the music</button>
+          </div>
+          <div id="parts-list">
+            <button id="start-markup">Mark your part on the music</button>
+            <p class="hint">Or pick it:</p>
+            <ul id="lines" class="lines"></ul>
+          </div>
+          <p id="parts-show" class="hint" hidden><button id="show-parts" class="link"></button></p>
         </div>
         <div id="marked-part" class="marked-part" hidden>
           <p>Using your marks: <strong id="marked-count"></strong></p>
@@ -211,7 +226,7 @@
             <button id="clear-marks" class="danger-text">Clear marks</button>
           </div>
         </div>
-        <p id="fix-link" class="hint">Parts out of step, or staves grouped wrongly on a page? <button id="start-fix" class="link">Fix systems</button></p>
+        <p id="fix-link" class="hint">Parts out of step, or staves grouped wrongly on a page? <button id="start-fix" class="link">Check and fix systems</button></p>
 
         <div class="controls">
           <label><span>Other parts <output id="others-val"></output></span>
@@ -258,7 +273,7 @@
       </div>
 
       <div id="fix-bar" class="markup-bar" hidden>
-        <p>Tap the top staff of a system, then its bottom staff. Tap a band to remove it. Faint outlines show how it was read.</p>
+        <p>Tap the top staff of a system, then its bottom staff. Tap a band to remove it. Numbered boxes show how Partsong read the page.</p>
         <button id="fix-cancel">Cancel</button>
         <button id="fix-done" class="primary">Read again</button>
       </div>

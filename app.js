@@ -1347,6 +1347,7 @@ function openScore(entry, nav = "push") {
   current.repeats = entry.repeats ?? {};
   current.playRepeats = entry.playRepeats ?? true;
   renderRepeats();
+  showAllParts = false;
   renderLines();
   renderPartChoice();
   applyLock();
@@ -1536,8 +1537,30 @@ function myLineAt(beat) {
   return current.manual[barAt(beat).system] ?? null;
 }
 
+// The list of parts is clearly wrong when a part's name comes up twice, or
+// there are more sung lines than any choir score has (layouts that change
+// between pages, e.g. Christ Is King: 16 lines, two of each SATB name). Then
+// the panel shows how to get your part (Fix systems, then mark) instead.
+let showAllParts = false;
+function partsDoubtful() {
+  const names = score.lines.filter((l) => !l.accompaniment).map((l) => l.label);
+  return new Set(names).size < names.length || names.length > 8;
+}
+
 function renderPartChoice() {
   const marked = Object.keys(current.manual).length;
+  const doubt = partsDoubtful() && !showAllParts;
+  const canFix = !!current.images?.length;
+  $("parts-doubt").hidden = !doubt;
+  $("parts-list").hidden = doubt;
+  $("parts-show").hidden = !doubt;
+  $("show-parts").textContent = `Show the ${score.lines.length} parts it found`;
+  $("doubt-fix-step").hidden = !canFix;
+  $("doubt-intro").textContent = canFix
+    ? "Its layout changes from page to page. Two steps get you your part exactly:"
+    : "Mark the staff you sing on the music instead:";
+  $("doubt-mark-title").textContent = canFix ? "2. Mark your part" : "Mark your part";
+  $("fix-link").hidden = !canFix || (doubt && marked === 0);
   $("auto-part").hidden = marked > 0;
   $("marked-part").hidden = marked === 0;
   $("marked-count").textContent = `${marked} of ${score.systems.length} systems`;
@@ -1613,6 +1636,12 @@ function startMarkup(mode = "part") {
   window.scrollTo({ top: $("follow").offsetTop - 60, behavior: "smooth" });
 }
 $("start-markup").onclick = () => startMarkup();
+$("doubt-mark").onclick = () => startMarkup();
+$("doubt-fix").onclick = () => startMarkup("systems");
+$("show-parts").onclick = () => {
+  showAllParts = true;
+  renderPartChoice();
+};
 $("edit-markup").onclick = () => startMarkup();
 
 // nav=false when the back button already left the mark-up history entry.
@@ -1666,12 +1695,19 @@ function renderFix() {
       for (const [k, v] of Object.entries({ class: cls, x, y, width: w, height: h, rx: view.w * 0.006 })) r.setAttribute(k, v);
       view.fix.append(r);
     };
-    for (const sys of score.systems) {
-      if (sys.page !== p || !sys.box || !sys.staves.length) continue;
-      const y0 = Math.min(...sys.staves.map((st) => st.y0));
-      const y1 = Math.max(...sys.staves.map((st) => st.y1));
-      rect("fix-current", sys.box.x0 - view.w * 0.02, y0 - view.h * 0.01, sys.box.x1 - sys.box.x0 + view.w * 0.04, y1 - y0 + view.h * 0.02);
-    }
+    // Across the whole page: only which staves are grouped together matters
+    // here (a box round the notes read stops short where a bar wasn't).
+    const read = score.systems.filter((sys) => sys.page === p && sys.box && sys.staves.length);
+    read.forEach((sys, i) => {
+      const y0 = Math.min(...sys.staves.map((st) => st.y0)) - view.h * 0.01;
+      const y1 = Math.max(...sys.staves.map((st) => st.y1)) + view.h * 0.01;
+      const alt = i % 2 ? " alt" : "";
+      rect("fix-current" + alt, view.w * 0.03, y0, view.w * 0.94, y1 - y0);
+      const label = document.createElementNS(SVG, "text");
+      for (const [k, v] of Object.entries({ class: "fix-label" + alt, x: view.w * 0.04, y: y0 + view.w * 0.045, "font-size": view.w * 0.04 })) label.setAttribute(k, v);
+      label.textContent = String(i + 1);
+      view.fix.append(label);
+    });
     for (const [top, bottom] of fixDraft[p] ?? []) rect("fix-band", view.w * 0.02, top, view.w * 0.96, bottom - top);
     if (fixPending?.page === p) {
       const line = document.createElementNS(SVG, "line");
@@ -1806,8 +1842,10 @@ function applyLock() {
     $("delete"),
     $("read-again"),
     $("start-fix"),
+    $("doubt-mark"),
+    $("doubt-fix"),
   ]) el.disabled = locked;
-  $("fix-link").hidden = !current.images?.length;
+  renderPartChoice();
   $("read-again").hidden = !current.images?.length;
 }
 
