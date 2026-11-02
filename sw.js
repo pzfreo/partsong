@@ -21,6 +21,10 @@ const SHELL_FILES = [
   "omr-worker.js",
   "omr/partsong_omr.wasm",
   "omr/partsong_omr_fused.wasm",
+  "omr/partsong_omr_threads.wasm",
+  "omr/partsong_omr_threads_fused.wasm",
+  "omr/encoder_pool.mjs",
+  "omr/encoder_worker.mjs",
   "manifest.webmanifest",
   "icon.svg",
   "icon-192.png",
@@ -36,14 +40,15 @@ self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 
 // GitHub Pages can't send headers, so the worker adds the two that make the
 // app cross-origin isolated, which lets the music reader's WASM use several
-// threads (the decoder is ~60% of a page's time). credentialless keeps the CDN
-// libraries and analytics loading without CORP headers. Applies from the first
-// load the worker controls.
+// threads. require-corp, not credentialless: Safari ignores credentialless,
+// which left iPhones on one thread. Every cross-origin file the app loads
+// allows it (jsDelivr sends CORP; GoatCounter's script is fetched with CORS).
+// Applies from the first load the worker controls.
 function isolated(res) {
   if (!res || res.type === "opaqueredirect" || !res.status) return res;
   const headers = new Headers(res.headers);
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
-  headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+  headers.set("Cross-Origin-Embedder-Policy", "require-corp");
   const body = [101, 103, 204, 205, 304].includes(res.status) ? null : res.body; // no-body statuses
   return new Response(body, { status: res.status, statusText: res.statusText, headers });
 }

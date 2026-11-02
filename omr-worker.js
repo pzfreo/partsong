@@ -169,6 +169,16 @@ const RELAXED_SIMD = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0
 // results where the browser fuses multiply-adds (as onnxruntime does on ARM);
 // it checks that itself. Otherwise the plain SIMD build, slower but exact.
 async function decoderModule() {
+  // The exact encoder shares its work across threads when the page is
+  // cross-origin isolated (shared memory), with the same results.
+  const threads = Math.min(4, navigator.hardwareConcurrency || 1);
+  if (exactEncoder && self.crossOriginIsolated && threads > 1) {
+    try {
+      return await threadedModule(threads);
+    } catch (e) {
+      post({ type: "log", msg: `Threaded encoder unavailable (${e.message})` });
+    }
+  }
   if (WebAssembly.validate(RELAXED_SIMD)) {
     try {
       const mod = await WebAssembly.compileStreaming(fetch("omr/partsong_omr_fused.wasm" + location.search));
@@ -180,6 +190,27 @@ async function decoderModule() {
   }
   const { exports: rs } = await WebAssembly.instantiate(wasmModule, {});
   return { rs, build: "SIMD" };
+}
+async function threadedModule(threads) {
+  const { EncoderPool } = await import("./omr/encoder_pool.mjs");
+  const pick = async (file) => {
+    const mod = await WebAssembly.compileStreaming(fetch(file + location.search));
+    const pool = await EncoderPool.create(mod, { threads });
+    return pool;
+  };
+  if (WebAssembly.validate(RELAXED_SIMD)) {
+    try {
+      const pool = await pick("omr/partsong_omr_threads_fused.wasm");
+      if (pool.exports.decoder_fused_simd_supported() === 1 && pool.exports.encoder_fused_simd_supported() === 1) {
+        return { rs: pool.exports, build: `relaxed SIMD, ${threads} threads` };
+      }
+      await pool.close();
+    } catch (e) {
+      post({ type: "log", msg: `Relaxed SIMD threaded encoder unavailable (${e.message})` });
+    }
+  }
+  const pool = await pick("omr/partsong_omr_threads.wasm");
+  return { rs: pool.exports, build: `SIMD, ${threads} threads` };
 }
 async function rustDecoder() {
   if (decoderInstance) return decoderInstance;
