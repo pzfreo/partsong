@@ -471,7 +471,20 @@ function startWorker() {
       reject(err);
     };
   });
-  worker.postMessage({ type: "init" });
+  worker.postMessage({ type: "init", exact: exactEncoder() });
+}
+
+// Test switch (?exact=1 / ?exact=0, remembered): homr's encoder in homr-rs,
+// bit-exact with native homr but on the CPU, instead of onnxruntime-web.
+function exactEncoder() {
+  try {
+    const q = new URLSearchParams(location.search).get("exact");
+    if (q === "1") localStorage.setItem("partsong-exact", "1");
+    if (q === "0") localStorage.removeItem("partsong-exact");
+    return localStorage.getItem("partsong-exact") === "1";
+  } catch {
+    return false;
+  }
 }
 
 function resetWorker() {

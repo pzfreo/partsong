@@ -159,6 +159,10 @@ async function run(id, feeds, names) {
 // once): homr's greedy loop (decoder_inference.py ScoreDecoder.generate) with
 // the same results as onnxruntime, without a call per symbol.
 let decoderInstance;
+// Test switch: homr's encoder in homr-rs too (bit-exact with native homr, on
+// the CPU) instead of onnxruntime-web (GPU where available, not exact).
+let exactEncoder = false;
+const IMAGE_VALUES = 256 * 1280;
 // A module using relaxed SIMD's i32x4.relaxed_madd... (onnxruntime-web's check).
 const RELAXED_SIMD = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 19, 1, 17, 0, 65, 1, 253, 15, 65, 2, 253, 15, 65, 3, 253, 15, 253, 147, 2, 11]);
 // The relaxed-SIMD build is several times faster, and gives homr's exact
@@ -190,6 +194,17 @@ async function rustDecoder() {
   const contextBytes = CONTEXT_POSITIONS * DECODER_DIM * 4;
   decoderInstance = { rs, model, context: rs.decoder_alloc(contextBytes), out: rs.decoder_alloc(MAX_SEQ_LEN * 32) };
   post({ type: "log", msg: `Loaded ${MODELS[2]} in homr-rs (${build}) in ${Math.round(performance.now() - t0)} ms` });
+  if (exactEncoder) {
+    const t1 = performance.now();
+    const eb = await modelBytes(MODELS[1]);
+    const ep = rs.decoder_alloc(eb.byteLength);
+    new Uint8Array(rs.memory.buffer, ep, eb.byteLength).set(eb);
+    decoderInstance.encoder = rs.encoder_load(ep, eb.byteLength);
+    rs.decoder_free(ep, eb.byteLength);
+    if (!decoderInstance.encoder) throw new Error("the music reader couldn't load homr's encoder");
+    decoderInstance.image = rs.decoder_alloc(IMAGE_VALUES * 4);
+    post({ type: "log", msg: `Loaded ${MODELS[1]} in homr-rs (${build}, exact) in ${Math.round(performance.now() - t1)} ms` });
+  }
   return decoderInstance;
 }
 
@@ -199,7 +214,19 @@ function decode({ rs, model, context, out }, ctx) {
   const t0 = performance.now();
   if (ctx.dims[1] !== CONTEXT_POSITIONS || ctx.dims[2] !== DECODER_DIM) throw new Error(`unexpected encoder output ${ctx.dims}`);
   new Float32Array(rs.memory.buffer, context, CONTEXT_POSITIONS * DECODER_DIM).set(ctx.data);
-  let n = rs.decoder_run(model, context, out, MAX_SEQ_LEN, 0);
+  return steps(rs, out, rs.decoder_run(model, context, out, MAX_SEQ_LEN, 0), t0);
+}
+
+// The exact path: encoder and decoder both in homr-rs, the context never
+// leaving its memory.
+function encodeDecode({ rs, model, encoder, image, out }, input) {
+  const t0 = performance.now();
+  if (input.length !== IMAGE_VALUES) throw new Error(`unexpected staff image size ${input.length}`);
+  new Float32Array(rs.memory.buffer, image, IMAGE_VALUES).set(input);
+  return steps(rs, out, rs.encoder_decode(encoder, model, image, out, MAX_SEQ_LEN), t0);
+}
+
+function steps(rs, out, n, t0) {
   if (!n) throw new Error("the music reader's decoder failed");
   const words = new DataView(rs.memory.buffer, out, n * 32);
   if (words.getUint32((n - 1) * 32, true) === EOS_TOKEN) n--;
@@ -287,8 +314,8 @@ async function recognise(imageBytes, systemsJson) {
   if (rs.page_segment(cp) !== 0) throw new Error(message());
   rs.dealloc(cp, classes.byteLength);
 
-  const encoder = await session(MODELS[1]);
   const decoder = await rustDecoder();
+  const encoder = exactEncoder ? null : await session(MODELS[1]);
   let staff = 0;
   for (;;) {
     const state = rs.page_step();
@@ -299,10 +326,14 @@ async function recognise(imageBytes, systemsJson) {
     const h = rs.staff_input_h();
     const w = rs.staff_input_w();
     const input = new Float32Array(mem(), rs.buf_ptr(), h * w).slice();
-    const e = sessions[encoder];
-    const context = (await run(encoder, { [e.inputNames[0]]: new ort.Tensor("float32", input, [1, 1, h, w]) }, [e.outputNames[0]]))[e.outputNames[0]];
-    const ctx = context.location === "cpu" || !context.location ? context : new ort.Tensor("float32", await context.getData(), context.dims);
-    const r = decode(decoder, ctx);
+    let r;
+    if (exactEncoder) r = encodeDecode(decoder, input);
+    else {
+      const e = sessions[encoder];
+      const context = (await run(encoder, { [e.inputNames[0]]: new ort.Tensor("float32", input, [1, 1, h, w]) }, [e.outputNames[0]]))[e.outputNames[0]];
+      const ctx = context.location === "cpu" || !context.location ? context : new ort.Tensor("float32", await context.getData(), context.dims);
+      r = decode(decoder, ctx);
+    }
     const tp = copyIn(r.tokens);
     const ap = copyIn(r.attention);
     rs.staff_result(tp, r.tokens.length, ap, r.attention.length);
@@ -312,7 +343,8 @@ async function recognise(imageBytes, systemsJson) {
 }
 
 // noGpu (tests, comparisons): run every model on WASM.
-async function init(noGpu) {
+async function init(noGpu, exact) {
+  exactEncoder = !!exact;
   ort = await import(ORT_URL + "ort.webgpu.min.mjs");
   ort.env.wasm.wasmPaths = ORT_URL;
   ort.env.wasm.numThreads = self.crossOriginIsolated
@@ -332,7 +364,7 @@ let ready;
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
-      ready ??= init(!!data.noGpu);
+      ready ??= init(!!data.noGpu, !!data.exact);
       await ready;
     } else if (data.type === "recognise") {
       await ready;
@@ -342,7 +374,7 @@ self.onmessage = async ({ data }) => {
       const ms = Math.round(performance.now() - t0);
       const names = [...sessionIds.keys()];
       const parts = names.map((n) => `${n.split("_")[0]} ${Math.round(runTimes[sessionIds.get(n)]?.ms ?? 0)} ms/${runTimes[sessionIds.get(n)]?.calls ?? 0} calls`);
-      if (runTimes.decoder) parts.push(`decoder ${Math.round(runTimes.decoder.ms)} ms/${runTimes.decoder.calls} calls`);
+      if (runTimes.decoder) parts.push(`${exactEncoder ? "encoder+decoder (homr-rs, exact)" : "decoder"} ${Math.round(runTimes.decoder.ms)} ms/${runTimes.decoder.calls} calls`);
       const inModels = runTimes.reduce((sum, t) => sum + (t?.ms ?? 0), 0) + (runTimes.decoder?.ms ?? 0);
       post({ type: "log", msg: `Page in ${ms} ms: ${parts.join(", ")}; reader ${Math.round(ms - inModels)} ms` });
       post({ type: "result", id: data.id, xml, ms });
