@@ -172,7 +172,9 @@ async function decoderModule() {
   // The exact encoder shares its work across threads when the page is
   // cross-origin isolated (shared memory), with the same results. Threads
   // claim small pieces as they come free, so slower cores don't hold it up.
-  const threads = Math.min(8, navigator.hardwareConcurrency || 4);
+  // 4, not more: on an Android phone (threads-test.html) 4 threads took 946 ms
+  // a staff and 8 took 1668 ms, the extra threads landing on slow cores.
+  const threads = Math.min(4, navigator.hardwareConcurrency || 1);
   if (exactEncoder && self.crossOriginIsolated && threads > 1) {
     try {
       return await threadedModule(threads);
