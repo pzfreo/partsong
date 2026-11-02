@@ -170,8 +170,9 @@ const RELAXED_SIMD = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0
 // it checks that itself. Otherwise the plain SIMD build, slower but exact.
 async function decoderModule() {
   // The exact encoder shares its work across threads when the page is
-  // cross-origin isolated (shared memory), with the same results.
-  const threads = Math.min(4, navigator.hardwareConcurrency || 1);
+  // cross-origin isolated (shared memory), with the same results. Threads
+  // claim small pieces as they come free, so slower cores don't hold it up.
+  const threads = Math.min(8, navigator.hardwareConcurrency || 4);
   if (exactEncoder && self.crossOriginIsolated && threads > 1) {
     try {
       return await threadedModule(threads);
