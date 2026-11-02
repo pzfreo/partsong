@@ -172,9 +172,9 @@ async function decoderModule() {
   // The exact encoder shares its work across threads when the page is
   // cross-origin isolated (shared memory), with the same results. Threads
   // claim small pieces as they come free, so slower cores don't hold it up.
-  // 4, not more: on an Android phone (threads-test.html) 4 threads took 946 ms
-  // a staff and 8 took 1668 ms, the extra threads landing on slow cores.
-  const threads = Math.min(4, navigator.hardwareConcurrency || 1);
+  // How many: what tune() measured on this device, else 4 (on an Android
+  // phone 4 threads took 946 ms a staff and 8 took 1668 ms).
+  const threads = encoderThreads || Math.min(4, navigator.hardwareConcurrency || 1);
   if (exactEncoder && self.crossOriginIsolated && threads > 1) {
     try {
       return await threadedModule(threads);
@@ -194,6 +194,59 @@ async function decoderModule() {
   const { exports: rs } = await WebAssembly.instantiate(wasmModule, {});
   return { rs, build: "SIMD" };
 }
+// The exact encoder's thread count: from the app (tuned once on this device).
+let encoderThreads;
+let tuning;
+
+// Times the exact encoder once at each thread count this device could use and
+// picks the fewest within 10% of the fastest. Results are the same whatever the
+// count, so this only chooses speed. About 10 s on a phone, once.
+async function tune() {
+  const counts = [2, 3, 4, 6, 8].filter((n) => n <= (navigator.hardwareConcurrency || 1));
+  if (!self.crossOriginIsolated || !counts.length) return { threads: null };
+  const { EncoderPool } = await import("./omr/encoder_pool.mjs");
+  const bytes = await modelBytes(MODELS[1]);
+  const image = new Float32Array(IMAGE_VALUES);
+  for (let i = 0; i < image.length; i++) image[i] = ((i * 2654435761) >>> 0) / 4294967296; // fixed pseudo-random pixels
+  let fused = WebAssembly.validate(RELAXED_SIMD);
+  const file = () => (fused ? "omr/partsong_omr_threads_fused.wasm" : "omr/partsong_omr_threads.wasm");
+  let mod = await WebAssembly.compileStreaming(fetch(file() + location.search));
+  const ms = {};
+  for (let i = 0; i < counts.length; i++) {
+    const n = counts[i];
+    const pool = await EncoderPool.create(mod, { threads: n });
+    try {
+      const e = pool.exports;
+      if (fused && e.encoder_fused_simd_supported() !== 1) {
+        fused = false; // as decoderModule would: the plain SIMD build
+        mod = await WebAssembly.compileStreaming(fetch(file() + location.search));
+        i--;
+        continue;
+      }
+      const p = e.decoder_alloc(bytes.byteLength);
+      new Uint8Array(e.memory.buffer, p, bytes.byteLength).set(bytes);
+      const encoder = e.encoder_load(p, bytes.byteLength);
+      e.decoder_free(p, bytes.byteLength);
+      if (!encoder) throw new Error("couldn't load the encoder");
+      const img = e.decoder_alloc(IMAGE_VALUES * 4);
+      const ctx = e.decoder_alloc(CONTEXT_POSITIONS * DECODER_DIM * 4);
+      new Float32Array(e.memory.buffer, img, IMAGE_VALUES).set(image);
+      if (i === 0) e.encoder_run(encoder, img, ctx); // warm-up, once
+      const t0 = performance.now();
+      if (!e.encoder_run(encoder, img, ctx)) throw new Error("the encoder failed");
+      ms[n] = Math.round(performance.now() - t0);
+      e.encoder_drop(encoder);
+    } finally {
+      await pool.close();
+    }
+  }
+  const best = Math.min(...Object.values(ms));
+  const threads = counts.find((n) => ms[n] <= best * 1.1);
+  const times = counts.map((n) => `${n}: ${ms[n]} ms`).join(" · ");
+  post({ type: "log", msg: `Tuned encoder threads: ${threads} (${fused ? "relaxed SIMD" : "SIMD"}; ${times})` });
+  return { threads, ms };
+}
+
 async function threadedModule(threads) {
   const { EncoderPool } = await import("./omr/encoder_pool.mjs");
   const pick = async (file) => {
@@ -398,10 +451,22 @@ let ready;
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
+      if (Number.isInteger(data.threads) && data.threads > 0) encoderThreads = data.threads;
       ready ??= init(!!data.noGpu, !!data.exact);
       await ready;
+    } else if (data.type === "tune") {
+      await ready;
+      tuning = tune().then(
+        (r) => {
+          if (r.threads) encoderThreads = r.threads;
+          post({ type: "tuned", ...r });
+        },
+        (e) => post({ type: "tuned", threads: null, error: String(e && e.message ? e.message : e) }),
+      );
+      await tuning;
     } else if (data.type === "recognise") {
       await ready;
+      await tuning;
       const t0 = performance.now();
       runTimes = [];
       const xml = await recognise(data.image, data.systems ?? "");

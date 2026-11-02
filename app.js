@@ -16,7 +16,7 @@ const readerLog = [];
 // How the reader started (models loaded, which decoder build, threads, GPU
 // fallbacks): kept apart so a long read doesn't push it out of the report.
 const readerSetup = [];
-const SETUP_LOG = /^(Loaded |WASM threads|WebGPU run failed|Relaxed SIMD)/;
+const SETUP_LOG = /^(Loaded |WASM threads|WebGPU run failed|Relaxed SIMD|Tuned |Tuning )/;
 const remember = (list, item, max) => {
   list.push(`${new Date().toISOString().slice(11, 19)} ${item}`);
   if (list.length > max) list.shift();
@@ -444,6 +444,15 @@ function startWorker() {
           localStorage.setItem(READER_FETCHED, "1");
         } catch {}
         resolve();
+      } else if (data.type === "tuned") {
+        if (data.threads) {
+          try {
+            localStorage.setItem(TUNED_THREADS, JSON.stringify({ threads: data.threads, ms: data.ms }));
+          } catch {}
+        } else if (data.error) {
+          remember(readerSetup, `Tuning failed: ${data.error}`.slice(0, 200), 10);
+        }
+        tuned?.();
       } else if (data.type === "log") {
         console.log("[omr]", data.msg);
         if (SETUP_LOG.test(data.msg)) remember(readerSetup, String(data.msg).slice(0, 200), 10);
@@ -471,7 +480,25 @@ function startWorker() {
       reject(err);
     };
   });
-  worker.postMessage({ type: "init", exact: exactEncoder() });
+  worker.postMessage({ type: "init", exact: exactEncoder(), threads: tunedThreads() });
+}
+
+// The exact encoder's thread count, measured once on this device (see tune()
+// in omr-worker.js). Bump the key when the encoder's threading changes.
+const TUNED_THREADS = "partsong-encoder-threads-v1";
+let tuned;
+function tunedThreads() {
+  try {
+    return JSON.parse(localStorage.getItem(TUNED_THREADS))?.threads;
+  } catch {
+    return undefined;
+  }
+}
+function tuneReader() {
+  return new Promise((resolve) => {
+    tuned = resolve;
+    worker.postMessage({ type: "tune" });
+  });
 }
 
 // Test switch (?exact=1 / ?exact=0, remembered): homr's encoder in homr-rs,
@@ -496,20 +523,25 @@ function resetWorker() {
 // The music reader's models (157 MB, once) download in the background soon
 // after the app opens, so the first scan doesn't wait for them. Not on mobile
 // data or data saver where the phone says so (Android Chrome); not again once
-// done. Afterwards the reader is closed unless a scan is using it.
+// done. With the exact encoder, the reader then times it once at several
+// thread counts (tune). Afterwards the reader is closed unless a scan is using it.
 const READER_FETCHED = "partsong-reader-fetched";
 function prefetchReader() {
+  let fetched = false;
   try {
-    if (localStorage.getItem(READER_FETCHED)) return;
+    fetched = !!localStorage.getItem(READER_FETCHED);
   } catch {}
+  const needTune = exactEncoder() && self.crossOriginIsolated && !tunedThreads();
+  if (fetched && !needTune) return;
   const c = navigator.connection;
-  if (c?.saveData || c?.type === "cellular") return;
+  if (!fetched && (c?.saveData || c?.type === "cellular")) return;
   setTimeout(() => {
     if (worker) return; // a scan has started it already
     startWorker();
     const started = worker;
     workerReady.then(
-      () => {
+      async () => {
+        if (needTune && worker === started) await tuneReader();
         if (worker === started && !reading && $("scan").hidden) resetWorker();
       },
       () => {},
