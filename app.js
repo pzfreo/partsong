@@ -642,8 +642,7 @@ async function trySample() {
   setPageStatus("Opening the sample…");
   try {
     const blob = await (await fetch("samples/tallis-if-ye-love-me.pdf")).blob();
-    await addFiles([new File([blob], "If ye love me (sample).pdf", { type: "application/pdf" })]);
-    setPageStatus("Tap Read music to read the sample.");
+    if (await addFiles([new File([blob], "If ye love me (sample).pdf", { type: "application/pdf" })])) setPageStatus("Tap Read music to read the sample.");
   } catch (e) {
     setPageStatus(`Couldn't open the sample: ${e.message}`);
   }

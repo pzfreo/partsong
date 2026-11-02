@@ -23,6 +23,20 @@ export async function isPdf(file) {
 }
 
 // Calls onPage(blob, pageNumber, pageCount) for each page, in order.
+// A page drawn when the phone was short of memory can come back empty or
+// undecodable: say so here rather than fail later in the reader.
+async function checkImage(blob, n) {
+  try {
+    if (!blob?.size) throw new Error("empty");
+    const bmp = await createImageBitmap(blob);
+    const ok = bmp.width > 0 && bmp.height > 0;
+    bmp.close();
+    if (!ok) throw new Error("no pixels");
+  } catch {
+    throw new Error(`the phone ran out of memory drawing page ${n} of the PDF. Close some apps or browser tabs and try again`);
+  }
+}
+
 export async function pdfPages(file, onPage) {
   const lib = await load();
   const task = lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
@@ -38,7 +52,13 @@ export async function pdfPages(file, onPage) {
       canvas.height = Math.round(viewport.height);
       await page.render({ canvas, viewport, background: "#ffffff" }).promise;
       page.cleanup();
-      await onPage(await new Promise((r) => canvas.toBlob(r, "image/png")), n, doc.numPages);
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+      // Free the canvas now: Safari on iPhones caps the memory all canvases
+      // may use, and over the cap it hands back empty or unreadable images
+      // instead of failing (a page is about 35 MB).
+      canvas.width = canvas.height = 0;
+      await checkImage(blob, n);
+      await onPage(blob, n, doc.numPages);
     }
   } finally {
     task.destroy();
