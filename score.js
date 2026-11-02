@@ -17,9 +17,9 @@ function imagePosition(note) {
   return null;
 }
 
-// The reader also records homr's own voice tag (omr/runner.py): upper/lower
+// The reader also records homr's own voice tag (omr-rs): upper/lower
 // for the first (stem-up) voice on a staff, upper2/lower2 for the second.
-// And the outline of the staff it was read from (omr/runner.py), so a staff
+// And the outline of the staff it was read from (omr-rs), so a staff
 // can be marked even where it only has rests.
 function staffBox(note) {
   for (const c of note.childNodes) {

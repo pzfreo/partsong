@@ -12,22 +12,29 @@ then *Add to Home screen*.
 ## How it works
 
 - **Recognition**: [homr](https://github.com/liebharc/homr) (optical music
-  recognition) runs unmodified in a module Web Worker under
-  [Pyodide](https://pyodide.org). `omr/onnxruntime.py` replaces the
-  `onnxruntime` package and forwards model calls to
+  recognition), as ported to Rust in [homr-rs](https://github.com/pzfreo/homr-rs),
+  runs as WebAssembly in a module Web Worker (`omr-worker.js`,
+  `omr/partsong_omr.wasm`), so it works in every current browser, iPhone and
+  Safari included. homr's three ONNX models run on
   [onnxruntime-web](https://onnxruntime.ai) (WebGPU for the segmentation and
-  encoder models when available, WASM for the decoder). Python blocks on those
-  calls via JSPI, so it needs **Chrome/Edge 137+** (current Chrome on Android
-  is fine).
-- **Recognition speed** (one page, huron_1, desktop Chrome): 12.1 s → 7.4 s,
-  same MusicXML. The decoder's key/value cache stays on the JS side between
-  its ~340 steps instead of being copied to Python and back (`omr-worker.js`
-  `run`/`keep`); the service worker adds COOP/COEP (`credentialless`) headers,
-  which GitHub Pages can't, so the app is cross-origin isolated and the WASM
-  decoder runs on 4 threads; `omr/runner.py` sweeps homr's pairwise shape merge
-  by x-extent. The worker logs each page's time per model and in Python.
-  Measured and rejected: the decoder is already int8-quantized, and batching
-  staves changes results (its dynamic quantization scale spans the batch).
+  encoder models when available, WASM for the decoder), driven from the
+  worker: segmentation on the page's tiles, then the encoder and the decoder's
+  greedy loop for each staff the reader asks for. `omr-rs/` is Partsong's own
+  part, built on homr-rs: the page interface for the worker and Partsong's
+  changes to how homr groups staves into systems (`omr-rs/src/layout.rs`).
+  Build it with `scripts/build-omr.sh` (needs Rust; homr-rs comes from GitHub at
+  the revision pinned in `omr-rs/Cargo.toml`).
+  It replaced homr in Python under Pyodide, which needed JSPI (Chrome/Edge
+  only). On the 148-page test corpus (desktop Chrome) the two gave the same
+  MusicXML for all 78 pages with music and the same error for the other 70,
+  also with Fix systems; reading took 742 s instead of 1204 s.
+- **Recognition speed**: the decoder (~340 steps a staff) is most of a page's
+  time. The service worker adds COOP/COEP (`credentialless`) headers, which
+  GitHub Pages can't, so the app is cross-origin isolated and the WASM decoder
+  runs on 4 threads. The worker logs each page's time per model and in the
+  reader. Measured and rejected: the decoder is already int8-quantized, and
+  batching staves changes results (its dynamic quantization scale spans the
+  batch).
 - **Models**: ~157 MB, downloaded once on first scan and kept in Cache Storage,
   in 4 MB pieces (HTTP range requests) so a dropped connection resumes rather
   than restarting; a stalled piece is retried.
@@ -35,7 +42,7 @@ then *Add to Home screen*.
   across a page's parts by position (homr occasionally splits a bar for one
   part). Each staff is split into an upper and a lower voice using homr's own
   per-note voice tags (upper/upper2, lower/lower2: stem-up and stem-down voices),
-  which `omr/runner.py` keeps in the MusicXML as comments because homr's writer
+  which the reader keeps in the MusicXML as comments because homr's writer
   renumbers voices; scores read before that fall back to a pitch/onset guess.
   Bars are grouped into systems.
 - **Choosing your part**: pick it from the parts list (matched across pages by
@@ -51,7 +58,7 @@ then *Add to Home screen*.
 - **Fix systems**: where the reader groups a page's staves into systems wrongly
   (parts then play out of step), tap the top and bottom staff of each system to
   make a band; Read again reads those pages with each band's staves as one
-  system (`recognise(path, systems_json)` in `omr/runner.py`). The bands are
+  system (`systems` in the worker's recognise message; `omr-rs/src/layout.rs`). The bands are
   kept with the score (`systemHints`) and used by later Read agains
   (`tests/drive-fix-systems.js`).
 - **Pages / As read** (button in the bottom bar): switch between your photos and the recognised score drawn
@@ -170,7 +177,8 @@ then *Add to Home screen*.
 ## Develop
 
 ```sh
-scripts/fetch-homr.sh          # pinned homr source -> vendor/, models -> models/
+scripts/fetch-models.sh        # homr's models -> models/
+scripts/build-omr.sh           # omr-rs -> omr/partsong_omr.wasm (needs Rust)
 python3 -m http.server 8765    # then open http://localhost:8765
 ```
 
@@ -249,7 +257,7 @@ app's About page links here, which is the offer of source to its users.
 Third-party components: [homr](https://github.com/liebharc/homr) (AGPL-3.0),
 whose models build on [oemer](https://github.com/BreezeWhite/oemer) (MIT) and
 [Polyphonic-TrOMR](https://github.com/NetEase/Polyphonic-TrOMR) (Apache-2.0);
-[Pyodide](https://pyodide.org) (MPL-2.0) with NumPy (BSD-3-Clause), OpenCV
-(Apache-2.0) and Pillow (MIT-CMU); [ONNX Runtime Web](https://onnxruntime.ai)
+[homr-rs](https://github.com/pzfreo/homr-rs) (AGPL-3.0), homr in Rust, including
+routines ported from OpenCV (Apache-2.0) and Pillow (MIT-CMU); [ONNX Runtime Web](https://onnxruntime.ai)
 (MIT); [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0);
 [OpenSheetMusicDisplay](https://opensheetmusicdisplay.org) (BSD-3-Clause).

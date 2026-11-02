@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8"><title>OMR batch</title>
+<pre id="log"></pre>
+<script>
+// Reads several pages with the music reader, each prepared as the app does
+// (oriented, at most 4200 px, PNG), and sets window.result to
+// { page: { xml } or { error } }. ?pages=a.png,b.jpg (in testdata/)
+// &systems=[[top,bottom],...] reads every page with those systems (Fix systems).
+const log = (s) => { console.log(s); document.getElementById("log").textContent += s + "\n"; };
+const q = new URLSearchParams(location.search);
+const pages = q.get("pages").split(",");
+const systems = q.get("systems") || "";
+window.result = null;
+async function normalise(blob) {
+  const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" });
+  const scale = Math.min(1, 4200 / Math.max(bmp.width, bmp.height));
+  const canvas = new OffscreenCanvas(Math.round(bmp.width * scale), Math.round(bmp.height * scale));
+  canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  return (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer();
+}
+const w = new Worker("../omr-worker.js", { type: "module" });
+const out = {};
+let i = 0;
+async function next() {
+  if (i === pages.length) return (window.result = out);
+  const img = await normalise(await (await fetch("../testdata/" + pages[i])).blob());
+  w.postMessage({ type: "recognise", id: i, image: img, systems }, [img]);
+}
+w.onmessage = ({ data }) => {
+  if (data.type === "ready") next();
+  else if (data.type === "result" || data.type === "error") {
+    out[pages[i]] = data.type === "result" ? { xml: data.xml, ms: data.ms } : { error: data.msg };
+    log(`${pages[i]}: ${data.type === "result" ? data.ms + " ms" : "ERROR " + data.msg.split("\n").at(-1)}`);
+    i++;
+    next();
+  }
+};
+w.postMessage({ type: "init" });
+</script>

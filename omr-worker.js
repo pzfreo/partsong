@@ -1,11 +1,9 @@
-// Module worker. Runs homr (Python, via Pyodide) with its ONNX models on onnxruntime-web.
-// Python blocks on model calls through JSPI, so this needs a JSPI-capable
-// browser (Chrome/Edge 137+).
+// Module worker: the music reader. homr's pipeline runs as WebAssembly
+// (omr/partsong_omr.wasm, built from omr-rs/ and homr-rs), and its three ONNX
+// models run on onnxruntime-web, driven from here: segnet on the page's tiles,
+// then the encoder and the decoder loop for each staff the reader asks for.
 
-const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/";
 const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
-// Safari has JSPI but (in 27, at least) refuses Pyodide's way of using it.
-const NO_JSPI = "Scanning doesn't work here yet (not on iPhone or iPad, or in Safari). Scan on an Android phone or a computer using Chrome or Edge, then share the score here to play it.";
 const MODEL_CACHE = "partscanner-models-v1";
 const MODELS = [
   "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx",
@@ -107,16 +105,6 @@ async function modelBytes(name) {
   return bytes;
 }
 
-const TYPED = {
-  float32: Float32Array,
-  int64: BigInt64Array,
-  int32: Int32Array,
-  uint8: Uint8Array,
-  bool: Uint8Array,
-};
-
-const kept = new Map(); // handle -> ort.Tensor
-let lastKept = 0;
 
 async function newSession(id) {
   const name = sessionNames[id];
@@ -133,186 +121,205 @@ async function newSession(id) {
   return session;
 }
 
-// Called from omr/onnxruntime.py.
-self.omrOrt = {
-  async create(name) {
-    if (!sessionIds.has(name)) {
-      const id = sessions.length;
-      sessionNames[id] = name;
-      sessions[id] = await newSession(id);
-      sessionIds.set(name, id);
-    }
-    const s = sessions[sessionIds.get(name)];
-    return { id: sessionIds.get(name), inputNames: s.inputNames, outputNames: s.outputNames };
-  },
+async function session(name) {
+  if (!sessionIds.has(name)) {
+    const id = sessions.length;
+    sessionNames[id] = name;
+    sessions[id] = await newSession(id);
+    sessionIds.set(name, id);
+  }
+  return sessionIds.get(name);
+}
 
-  // feeds: [name, type, dims, bytes], or [name, "kept", handle] for an output
-  // kept from an earlier run. Outputs named in `keep` stay here as handles
-  // (homr's decoder cache: Python only passes it back in on the next step, so
-  // copying it across every step was most of the decoder's time). A kept
-  // tensor is released once it has been passed back in.
-  async run(id, names, feeds, keep = []) {
-    const t0 = performance.now();
-    const inputs = {};
-    const used = [];
-    for (const [name, type, dims, bytes] of feeds) {
-      if (type === "kept") {
-        inputs[name] = kept.get(dims);
-        used.push(dims);
-      } else inputs[name] = new ort.Tensor(type, new TYPED[type](bytes.slice().buffer), dims);
+// Runs a session; if its GPU has gone away (e.g. the phone's, under memory
+// pressure), onnxruntime's WebGPU backend fails every run: carry on without it.
+async function run(id, feeds, names) {
+  const t0 = performance.now();
+  let out;
+  try {
+    out = await sessions[id].run(feeds, names);
+  } catch (e) {
+    if (!onGpu.has(id)) throw e;
+    post({ type: "log", msg: `WebGPU run failed (${e.message}); using WASM from now on` });
+    useGpu = false;
+    for (const other of [...onGpu]) {
+      const old = sessions[other];
+      Promise.resolve().then(() => old.release()).catch(() => {});
+      sessions[other] = await newSession(other);
     }
-    let out;
-    try {
-      out = await sessions[id].run(inputs, names);
-    } catch (e) {
-      // The phone's GPU can go away (e.g. under memory pressure); onnxruntime's
-      // WebGPU backend then fails every run. Carry on without the GPU.
-      if (!onGpu.has(id)) throw e;
-      post({ type: "log", msg: `WebGPU run failed (${e.message}); using WASM from now on` });
-      useGpu = false;
-      for (const other of [...onGpu]) {
-        const old = sessions[other];
-        Promise.resolve().then(() => old.release()).catch(() => {});
-        sessions[other] = await newSession(other);
-      }
-      out = await sessions[id].run(inputs, names);
-    }
-    for (const h of used) kept.delete(h);
-    const t = (runTimes[id] ??= { calls: 0, ms: 0 });
-    t.calls++;
-    t.ms += performance.now() - t0;
-    return names.map((n) => {
+    out = await sessions[id].run(feeds, names);
+  }
+  const t = (runTimes[id] ??= { calls: 0, ms: 0 });
+  t.calls++;
+  t.ms += performance.now() - t0;
+  return out;
+}
+
+// homr's greedy decoding loop for one staff (homr/transformer/
+// decoder_inference.py ScoreDecoder.generate). Returns, per step, the chosen
+// token of each head (rhythm, pitch, lift, position, articulation, slur) and
+// the attention output; the step whose rhythm is EOS isn't included.
+async function generate(id, context, start, nonote, eos, maxLen, heads, headDim, caches) {
+  const t0 = performance.now();
+  const session = sessions[id];
+  const contextDims = context.dims;
+  // After the first step homr passes only the context's first position.
+  const reduced = new ort.Tensor("float32", context.data.slice(0, contextDims[2]), [contextDims[0], 1, contextDims[2]]);
+  const token = (v) => new ort.Tensor("int64", BigInt64Array.of(BigInt(v)), [1, 1]);
+  const heads6 = ["out_rhythms", "out_pitchs", "out_lifts", "out_positions", "out_articulations", "out_slurs"];
+  const names = [...heads6, "attention", ...Array.from({ length: caches }, (_, i) => `cache_out${i}`)];
+  let cache = Array.from({ length: caches }, () => new ort.Tensor("float32", new Float32Array(0), [1, heads, 0, headDim]));
+  let last = { rhythm: start, pitch: nonote, lift: nonote, articulation: nonote, slur: nonote };
+  const tokens = [];
+  const attention = [];
+  let steps = 0;
+  for (let step = 0; step < maxLen; step++) {
+    const feeds = {
+      rhythms: token(last.rhythm),
+      pitchs: token(last.pitch),
+      lifts: token(last.lift),
+      articulations: token(last.articulation),
+      slurs: token(last.slur),
+      context: step === 0 ? context : reduced,
+      cache_len: new ort.Tensor("int64", BigInt64Array.of(BigInt(step)), [1]),
+    };
+    cache.forEach((t, i) => (feeds[`cache_in${i}`] = t));
+    const out = await session.run(feeds, names);
+    steps++;
+    cache = names.slice(7).map((n) => out[n]);
+    // Greedy: the most likely token at the last position of each head
+    // (the first, on a tie, as numpy's argmax).
+    const pick = (n) => {
       const t = out[n];
-      if (keep.includes(n)) {
-        kept.set(++lastKept, t);
-        return { type: t.type, dims: t.dims, handle: lastKept };
-      }
+      const size = t.dims.at(-1);
       const d = t.data;
-      return { type: t.type, dims: t.dims, data: new Uint8Array(d.buffer, d.byteOffset, d.byteLength), handle: 0 };
-    });
-  },
+      let best = d.length - size;
+      for (let k = best + 1; k < d.length; k++) if (d[k] > d[best]) best = k;
+      return best - (d.length - size);
+    };
+    const chosen = heads6.map(pick);
+    if (chosen[0] === eos) break;
+    tokens.push(...chosen);
+    attention.push(Float32Array.from(out.attention.data));
+    last = { rhythm: chosen[0], pitch: chosen[1], lift: chosen[2], articulation: chosen[4], slur: chosen[5] };
+  }
+  const t = (runTimes[id] ??= { calls: 0, ms: 0 });
+  t.calls += steps;
+  t.ms += performance.now() - t0;
+  const flat = new Float32Array(attention.reduce((n, a) => n + a.length, 0));
+  attention.reduce((at, a) => (flat.set(a, at), at + a.length), 0);
+  return { tokens: Int32Array.from(tokens), attention: flat };
+}
 
-  // homr's greedy decoding loop for one staff (homr/transformer/
-  // decoder_inference.py ScoreDecoder.generate), run here so the hundreds of
-  // steps per staff don't each cross into Python and back. Returns, per step,
-  // the chosen token of each head (rhythm, pitch, lift, position, articulation,
-  // slur) and the attention output; the step whose rhythm is EOS isn't included.
-  async generate(id, contextDims, contextBytes, start, nonote, eos, maxLen, heads, headDim, caches) {
-    const t0 = performance.now();
-    const session = sessions[id];
-    const context = new ort.Tensor("float32", new Float32Array(contextBytes.slice().buffer), contextDims);
-    // After the first step homr passes only the context's first position.
-    const reduced = new ort.Tensor("float32", context.data.slice(0, contextDims[2]), [contextDims[0], 1, contextDims[2]]);
-    const token = (v) => new ort.Tensor("int64", BigInt64Array.of(BigInt(v)), [1, 1]);
-    const heads6 = ["out_rhythms", "out_pitchs", "out_lifts", "out_positions", "out_articulations", "out_slurs"];
-    const names = [...heads6, "attention", ...Array.from({ length: caches }, (_, i) => `cache_out${i}`)];
-    let cache = Array.from({ length: caches }, () => new ort.Tensor("float32", new Float32Array(0), [1, heads, 0, headDim]));
-    let last = { rhythm: start, pitch: nonote, lift: nonote, articulation: nonote, slur: nonote };
-    const tokens = [];
-    const attention = [];
-    let attentionDims = [];
-    let steps = 0;
-    for (let step = 0; step < maxLen; step++) {
-      const feeds = {
-        rhythms: token(last.rhythm),
-        pitchs: token(last.pitch),
-        lifts: token(last.lift),
-        articulations: token(last.articulation),
-        slurs: token(last.slur),
-        context: step === 0 ? context : reduced,
-        cache_len: new ort.Tensor("int64", BigInt64Array.of(BigInt(step)), [1]),
-      };
-      cache.forEach((t, i) => (feeds[`cache_in${i}`] = t));
-      const out = await session.run(feeds, names);
-      steps++;
-      cache = names.slice(7).map((n) => out[n]);
-      // Greedy: the most likely token at the last position of each head.
-      const pick = (n) => {
-        const t = out[n];
-        const size = t.dims.at(-1);
-        const d = t.data;
-        let best = d.length - size;
-        for (let k = best + 1; k < d.length; k++) if (d[k] > d[best]) best = k;
-        return best - (d.length - size);
-      };
-      const chosen = heads6.map(pick);
-      if (chosen[0] === eos) break;
-      tokens.push(...chosen);
-      const a = out.attention;
-      attentionDims = a.dims;
-      attention.push(Float32Array.from(a.data));
-      last = { rhythm: chosen[0], pitch: chosen[1], lift: chosen[2], articulation: chosen[4], slur: chosen[5] };
-    }
-    const t = (runTimes[id] ??= { calls: 0, ms: 0 });
-    t.calls += steps;
-    t.ms += performance.now() - t0;
-    const flat = new Float32Array(attention.reduce((n, a) => n + a.length, 0));
-    attention.reduce((at, a) => (flat.set(a, at), at + a.length), 0);
-    return { tokens: Int32Array.from(tokens), attention: new Uint8Array(flat.buffer), attentionDims };
-  },
+// homr's transformer settings (homr/transformer/configs.py)
+const START_TOKEN = 1;
+const NONOTE_TOKEN = 0;
+const EOS_TOKEN = 2;
+const MAX_SEQ_LEN = 608;
+const DECODER_HEADS = 8;
+const DECODER_DIM = 512;
+const DECODER_DEPTH = 8;
+const SEGNET_BATCH = 8; // homr's batch size (kept: the GPU's results can depend on it)
+const WIN = 320;
 
-  // The contents of a kept output, if Python does want to read one.
-  data(handle) {
-    const d = kept.get(handle).data;
-    return new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
-  },
-};
-
-let pyodide;
-let recognise;
-let recogniseProfiled;
-// Per page: time inside each model (session id -> { calls, ms }); the rest of
-// the page's time is homr's Python (image processing, decoding) in Pyodide.
+let wasmModule;
 let runTimes = [];
 
-async function init() {
-  if (typeof WebAssembly.Suspending !== "function") {
-    throw new Error(NO_JSPI);
+// The page's pixels as homr's cv2.imread sees them (RGBA, no colour conversion).
+async function pixels(bytes) {
+  const bmp = await createImageBitmap(new Blob([bytes]), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+  const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  bmp.close();
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+async function recognise(imageBytes, systemsJson) {
+  // A fresh instance per page: its memory is returned afterwards (WebAssembly
+  // memory never shrinks), and a failure can't leave state behind.
+  const { exports: rs } = await WebAssembly.instantiate(wasmModule, {});
+  const mem = () => rs.memory.buffer;
+  const copyIn = (typed) => {
+    const p = rs.alloc(typed.byteLength);
+    new Uint8Array(mem(), p, typed.byteLength).set(new Uint8Array(typed.buffer, typed.byteOffset, typed.byteLength));
+    return p;
+  };
+  const message = () => new TextDecoder().decode(new Uint8Array(mem(), rs.msg_ptr(), rs.msg_len()));
+
+  const img = await pixels(imageBytes);
+  const ranges = systemsJson ? JSON.parse(systemsJson).flat() : [];
+  const rgba = copyIn(img.data);
+  const sys = copyIn(Float64Array.from(ranges));
+  const tiles = rs.page_open(rgba, img.width, img.height, sys, ranges.length / 2);
+  rs.dealloc(rgba, img.data.byteLength);
+
+  // Segmentation, SEGNET_BATCH tiles at a time; each tile's class map is the
+  // argmax over the classes (first on a tie, as numpy).
+  const segnet = await session(MODELS[0]);
+  const classes = new Uint8Array(tiles * WIN * WIN);
+  const tileSize = 3 * WIN * WIN;
+  for (let b = 0; b < tiles; b += SEGNET_BATCH) {
+    const n = Math.min(SEGNET_BATCH, tiles - b);
+    const input = new Float32Array(n * tileSize);
+    for (let k = 0; k < n; k++) input.set(new Float32Array(mem(), rs.tile(b + k), tileSize), k * tileSize);
+    const s = sessions[segnet];
+    const out = (await run(segnet, { [s.inputNames[0]]: new ort.Tensor("float32", input, [n, 3, WIN, WIN]) }, [s.outputNames[0]]))[s.outputNames[0]];
+    const c = out.dims[1];
+    const d = out.data;
+    const plane = WIN * WIN;
+    for (let k = 0; k < n; k++) {
+      const base = k * c * plane;
+      const dst = (b + k) * plane;
+      for (let i = 0; i < plane; i++) {
+        let best = 0;
+        let v = d[base + i];
+        for (let ch = 1; ch < c; ch++) {
+          const x = d[base + ch * plane + i];
+          if (x > v) (v = x), (best = ch);
+        }
+        classes[dst + i] = best;
+      }
+    }
   }
+  const cp = copyIn(classes);
+  if (rs.page_segment(cp) !== 0) throw new Error(message());
+  rs.dealloc(cp, classes.byteLength);
+
+  const encoder = await session(MODELS[1]);
+  const decoder = await session(MODELS[2]);
+  let staff = 0;
+  for (;;) {
+    const state = rs.page_step();
+    if (state === 0) return message();
+    if (state < 0) throw new Error(message());
+    if (staff === 0) post({ type: "log", msg: "Found the staffs" });
+    post({ type: "log", msg: `Running TrOmr inference on staff image ${staff++}` });
+    const h = rs.staff_input_h();
+    const w = rs.staff_input_w();
+    const input = new Float32Array(mem(), rs.buf_ptr(), h * w).slice();
+    const e = sessions[encoder];
+    const context = (await run(encoder, { [e.inputNames[0]]: new ort.Tensor("float32", input, [1, 1, h, w]) }, [e.outputNames[0]]))[e.outputNames[0]];
+    const ctx = context.location === "cpu" || !context.location ? context : new ort.Tensor("float32", await context.getData(), context.dims);
+    const r = await generate(decoder, ctx, START_TOKEN, NONOTE_TOKEN, EOS_TOKEN, MAX_SEQ_LEN, DECODER_HEADS, DECODER_DIM / DECODER_HEADS, DECODER_DEPTH * 4);
+    const tp = copyIn(r.tokens);
+    const ap = copyIn(r.attention);
+    rs.staff_result(tp, r.tokens.length, ap, r.attention.length);
+    rs.dealloc(tp, r.tokens.byteLength);
+    rs.dealloc(ap, r.attention.byteLength);
+  }
+}
+
+async function init() {
   ort = await import(ORT_URL + "ort.webgpu.min.mjs");
   ort.env.wasm.wasmPaths = ORT_URL;
   ort.env.wasm.numThreads = self.crossOriginIsolated
     ? Math.min(4, navigator.hardwareConcurrency || 1)
     : 1;
   post({ type: "log", msg: `WASM threads: ${ort.env.wasm.numThreads}` });
-  const { loadPyodide } = await import(PYODIDE_URL + "pyodide.mjs");
-  useGpu = !!(self.navigator.gpu && (await navigator.gpu.requestAdapter()));
-
-  post({ type: "progress", stage: "python" });
-  pyodide = await loadPyodide({ indexURL: PYODIDE_URL });
-  pyodide.setStderr({ batched: (msg) => post({ type: "log", msg }) });
-  pyodide.setStdout({ batched: (msg) => post({ type: "log", msg }) });
-  // Python waiting on a JavaScript promise is how every model call works;
-  // check it before downloading ~100 MB of models.
-  try {
-    await pyodide.runPython("from pyodide.ffi import run_sync\nlambda p: run_sync(p)").callPromising(Promise.resolve(1));
-  } catch (e) {
-    console.warn(e);
-    throw new Error(NO_JSPI);
-  }
-  await pyodide.loadPackage(["numpy", "opencv-python", "pillow", "typing-extensions"]);
-
-  const lib = "/home/pyodide/lib";
-  pyodide.FS.mkdirTree(lib);
+  useGpu = !!(self.navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)));
   // Same deploy version as this worker (?v=… from scripts/stamp-version.mjs).
-  const v = location.search;
-  const homrZip = await (await fetch("vendor/homr.zip" + v)).arrayBuffer();
-  pyodide.unpackArchive(homrZip, "zip", { extractDir: lib });
-  const version = new URLSearchParams(v).get("v");
-  for (const f of ["onnxruntime.py", "runner.py"]) {
-    let text = await (await fetch("omr/" + f + v)).text();
-    // A copy cached by another version would run an old reader with this app
-    // (it happened, see sw.js): fetch it again past any cached copy, and stop
-    // with a clear message if it still isn't this version.
-    const mine = (t) => !version || f !== "runner.py" || t.includes(`VERSION = "${version}"`);
-    if (!mine(text)) text = await (await fetch(`omr/${f}${v}&fresh=${Date.now()}`, { cache: "reload" })).text();
-    if (!mine(text)) throw new Error("The music reader didn't update. Reload Partsong (twice if needed) and try again.");
-    pyodide.FS.writeFile(`${lib}/${f}`, text);
-  }
-  pyodide.runPython(`import sys; sys.path.insert(0, "${lib}")`);
-  recognise = pyodide.pyimport("runner").recognise;
-  recogniseProfiled = pyodide.pyimport("runner").recognise_profiled;
-
+  wasmModule = await WebAssembly.compileStreaming(fetch("omr/partsong_omr.wasm" + location.search));
   for (const name of MODELS) {
     await downloadModel(name);
   }
@@ -327,22 +334,17 @@ self.onmessage = async ({ data }) => {
       await ready;
     } else if (data.type === "recognise") {
       await ready;
-      const path = `/tmp/page${data.id}.png`;
-      pyodide.FS.writeFile(path, new Uint8Array(data.image));
       const t0 = performance.now();
       runTimes = [];
-      // data.systems: the user's systems for this page (JSON), if they fixed it.
-      // data.profile (tests/omr-bench.html): logs where the Python's time goes.
-      const xml = await (data.profile ? recogniseProfiled : recognise).callPromising(path, data.systems ?? "");
+      const xml = await recognise(data.image, data.systems ?? "");
       const ms = Math.round(performance.now() - t0);
       const names = [...sessionIds.keys()];
       const parts = names.map((n) => `${n.split("_")[0]} ${Math.round(runTimes[sessionIds.get(n)]?.ms ?? 0)} ms/${runTimes[sessionIds.get(n)]?.calls ?? 0} calls`);
       const inModels = runTimes.reduce((sum, t) => sum + (t?.ms ?? 0), 0);
-      post({ type: "log", msg: `Page in ${ms} ms: ${parts.join(", ")}; Python ${Math.round(ms - inModels)} ms` });
+      post({ type: "log", msg: `Page in ${ms} ms: ${parts.join(", ")}; reader ${Math.round(ms - inModels)} ms` });
       post({ type: "result", id: data.id, xml, ms });
     }
   } catch (e) {
-    const msg = String(e && e.message ? e.message : e);
-    post({ type: "error", id: data.id, msg: /WebAssembly\.(Suspending|promising)/.test(msg) ? NO_JSPI : msg });
+    post({ type: "error", id: data.id, msg: String(e && e.message ? e.message : e) });
   }
 };

@@ -1,5 +1,5 @@
 // App shell: network-first so updates arrive, cache as offline fallback.
-// CDN libraries (Pyodide, onnxruntime-web, OSMD) are versioned: cache-first.
+// CDN libraries (onnxruntime-web, OSMD) are versioned: cache-first.
 // models/ is cached by omr-worker.js itself, so it passes straight through.
 const SHELL = "partscanner-shell-v1";
 const CDN = "partscanner-cdn-v1";
@@ -19,9 +19,7 @@ const SHELL_FILES = [
   "audio.js",
   "styles.css",
   "omr-worker.js",
-  "omr/onnxruntime.py",
-  "omr/runner.py",
-  "vendor/homr.zip",
+  "omr/partsong_omr.wasm",
   "manifest.webmanifest",
   "icon.svg",
   "icon-192.png",

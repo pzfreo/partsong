@@ -24,14 +24,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the whole history, to number the version
-      - name: Fetch homr source and models
-        run: scripts/fetch-homr.sh
+      - name: Fetch homr's models
+        run: scripts/fetch-models.sh
       - name: Assemble site
         run: |
-          mkdir -p _site/vendor
           cp -r index.html privacy.html terms.html *.js styles.css manifest.webmanifest icon.svg icon-192.png icon-512.png favicon.ico og-image.png robots.txt sitemap.xml \
             omr models fonts _site/
-          cp vendor/homr.zip _site/vendor/
           mkdir -p _site/samples && cp samples/tallis-if-ye-love-me.pdf _site/samples/
       # The version is the number of commits on main: it only ever goes up
       # (v121, v122, ...), and `git rev-list --reverse HEAD | sed -n 121p`

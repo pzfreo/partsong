@@ -80,8 +80,7 @@
         <li><a href="https://github.com/liebharc/homr" target="_blank" rel="noopener">homr</a> by Christian Liebhardt: reads the music (AGPL-3.0). Its models build on
           <a href="https://github.com/BreezeWhite/oemer" target="_blank" rel="noopener">oemer</a> (MIT) and
           <a href="https://github.com/NetEase/Polyphonic-TrOMR" target="_blank" rel="noopener">Polyphonic-TrOMR</a> (Apache-2.0).</li>
-        <li><a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a> (MPL-2.0), with
-          <a href="https://numpy.org" target="_blank" rel="noopener">NumPy</a> (BSD-3-Clause),
+        <li><a href="https://github.com/pzfreo/homr-rs" target="_blank" rel="noopener">homr-rs</a>: homr in Rust, so it runs in any browser (AGPL-3.0), including parts ported from
           <a href="https://opencv.org" target="_blank" rel="noopener">OpenCV</a> (Apache-2.0) and
           <a href="https://python-pillow.org" target="_blank" rel="noopener">Pillow</a> (MIT-CMU).</li>
         <li><a href="https://onnxruntime.ai" target="_blank" rel="noopener">ONNX Runtime Web</a> (MIT)</li>
@@ -121,7 +120,6 @@
         <button id="new-scan" class="primary">Scan music</button>
         <label class="button">Open PDF<input id="open-xml" type="file" accept=".pdf,application/pdf,.html,text/html,.musicxml,.xml,application/vnd.recordare.musicxml+xml" multiple hidden></label>
       </div>
-      <p class="no-reader" hidden></p>
       <p class="muted beta-note">Partsong is new and still in beta, so it won't read every score perfectly yet. If something goes wrong, please <button class="link report-open">report a problem</button>: it really helps us improve it.</p>
       <h2>Your scores</h2>
       <div id="install-card" class="install-card" hidden>
@@ -152,7 +150,6 @@
 
     <section id="scan" hidden>
       <p class="muted">Add one photo per page, in order, or a PDF. Hold the phone square to the page in good light.</p>
-      <p class="no-reader" hidden></p>
       <div class="actions">
         <label class="button primary">Take photo<input id="camera" type="file" accept="image/*" capture="environment" hidden></label>
         <label class="button">Add images or PDF<input id="gallery" type="file" accept="image/*,application/pdf,.pdf" multiple hidden></label>

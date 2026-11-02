@@ -432,8 +432,6 @@ function startWorker() {
         setEngineStatus(`Downloading music reader (once only): ${mb} / ${Math.round(data.total / 1e6)} MB`);
       } else if (data.type === "progress" && data.stage === "retry") {
         setEngineStatus(`${engineStatus.split(" · ")[0]} · connection dropped, retrying (${data.attempt})…`);
-      } else if (data.type === "progress" && data.stage === "python") {
-        setEngineStatus("Starting music reader…");
       } else if (data.type === "ready") {
         setEngineStatus("");
         resolve();
@@ -442,7 +440,7 @@ function startWorker() {
         remember(readerLog, String(data.msg).slice(0, 200), 40);
         const m = /Running TrOmr inference on staff image (\d+)/.exec(data.msg);
         if (m) setPageStatus(`reading staff ${Number(m[1]) + 1}`);
-        else if (/Found \d+ connected staffs/.test(data.msg)) setPageStatus("found the staves");
+        else if (/Found the staffs/.test(data.msg)) setPageStatus("found the staves");
       } else if (data.type === "result" || data.type === "error") {
         const p = pending.get(data.id);
         if (!p) {
@@ -509,31 +507,6 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
 
 $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
 
-// Every browser on iPhone/iPad is Safari underneath, and Safari can't run the
-// music reader (omr-worker.js): say so before they photograph a whole score.
-// (iPadOS asks for desktop sites, so it looks like a Mac with a touch screen.)
-const ua = navigator.userAgent;
-const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
-const macSafari = !iDevice && /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS|OPR/.test(ua);
-const noReader = iDevice || macSafari;
-let noReaderText = "";
-if (noReader) {
-  const device = /iPhone|iPod/.test(ua) ? "iPhone" : "iPad";
-  const where = iDevice ? `on ${device}` : "in Safari";
-  const text = iDevice
-    ? `Scanning doesn't work on ${device} yet, so here you can only open scores shared from Partsong. ` +
-      `Scan on an Android phone or a computer using Chrome or Edge, then share the score to your ${device} to play it.`
-    : "Scanning doesn't work in Safari yet, so here you can only open scores shared from Partsong. Please scan using Chrome or Edge.";
-  $("open-xml").previousSibling.textContent = "Open shared score";
-  noReaderText =
-    `This PDF is sheet music to scan, which doesn't work ${where} yet. ` +
-    "Here you can only open scores shared from Partsong (their files end in .partsong.pdf).";
-  for (const p of document.querySelectorAll(".no-reader")) Object.assign(p, { textContent: text, hidden: false });
-  // Hides everything that would start a read (styles.css): Scan music, the
-  // sample, Read again, Fix systems.
-  document.body.classList.add("no-reader-device");
-}
-
 // The sample score (samples/tallis-if-ye-love-me.pdf, from CPDL):
 // opens the scan screen with its pages added, ready for Read music.
 // Anonymous usage counts (GoatCounter, no cookies; see index.html): which
@@ -544,8 +517,8 @@ function track(name, title = name) {
   } catch {}
 }
 
-// Why a reading failed, short enough to count: the error's last line (a
-// Python traceback ends with the actual error), without file paths, and with
+// Why a reading failed, short enough to count: the error's last line,
+// without file paths, and with
 // numbers as N so the same failure counts together. Never the score or photo.
 function failureReason(e) {
   const last = String(e?.message ?? e).trim().split("\n").at(-1) || e?.name || "unknown";
@@ -821,8 +794,8 @@ async function readScan() {
     }
     track("read-failed");
     track(`read-failed: ${failureReason(e)}`);
-    // A Python traceback ends with the actual error; show that first, since
-    // the full trace runs off the bottom of a phone screen.
+    // A long error ends with the actual error; show that first, since the
+    // whole message can run off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
     const why = lines.length > 1 ? `${lines.at(-1)}\n\n${e.message}` : e.message;
     setPageStatus(`Couldn't read page ${pages.findIndex((p) => !p.xml) + 1}: ${why}`);
@@ -877,8 +850,7 @@ async function openFiles(files) {
       name ||= f.name.replace(/\.(musicxml|xml)$/i, "");
     }
     // An ordinary PDF is sheet music to read: start at once.
-    if (pdfs.length && noReader) showNotice(noReaderText);
-    else if (pdfs.length) {
+    if (pdfs.length) {
       loadScan();
       if ((await addFiles(pdfs)) && pages.length) readScan();
     }
