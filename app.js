@@ -1391,7 +1391,7 @@ function renderFollow() {
   const images = current.images ?? [];
   $("follow").hidden = !images.length || !score.measures.some((m) => m.box);
   $("photo-list").replaceChildren(
-    ...images.map((blob, p) => {
+    ...images.flatMap((blob, p) => {
       const div = document.createElement("div");
       div.className = "page";
       const img = document.createElement("img");
@@ -1412,8 +1412,13 @@ function renderFollow() {
       };
       svg.onclick = (e) => (fixing ? fixTap(p, e) : marking ? toggleMark(p, e) : pickBar(p, e));
       pageViews.push(view);
+      // Shown while checking systems: the page's number, under a red bar like
+      // a system split (a new page always starts a new system).
+      const label = document.createElement("p");
+      label.className = "page-label";
+      label.textContent = `Page ${p + 1}`;
       div.append(img, svg);
-      return div;
+      return [label, div];
     }),
   );
 }
@@ -1627,6 +1632,7 @@ function startMarkup(mode = "part") {
   marking = true;
   fixing = mode === "systems";
   document.body.classList.add("marking");
+  document.body.classList.toggle("fixing", fixing);
   $(fixing ? "fix-bar" : "markup-bar").hidden = false;
   if (fixing) startFix();
   const state = { screen: "practice", markup: true };
@@ -1649,7 +1655,7 @@ function endMarkup(nav = true) {
   if (!marking) return;
   marking = false;
   fixing = false;
-  document.body.classList.remove("marking");
+  document.body.classList.remove("marking", "fixing");
   $("markup-bar").hidden = $("fix-bar").hidden = true;
   renderFix();
   if (nav && history.state?.markup) history.back();
