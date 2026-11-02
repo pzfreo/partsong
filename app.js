@@ -133,7 +133,8 @@ function diagnostics() {
   }
   if (screen === "scan") lines.push(`Scan: ${pages.length} pages · status: ${$("status").textContent.replace(/\n/g, " | ")}`);
   if (recentErrors.length) lines.push("", "Recent errors:", ...recentErrors);
-  if (readerSetup.length) lines.push("", "Music reader setup:", ...readerSetup);
+  const setup = [...(tunedResult() ? [`Tuned encoder threads (saved): ${tunedResult()}`] : []), ...readerSetup];
+  if (setup.length) lines.push("", "Music reader setup:", ...setup);
   if (readerLog.length) lines.push("", "Music reader log:", ...readerLog.slice(-25));
   return lines.join("\n");
 }
@@ -489,9 +490,21 @@ const TUNED_THREADS = "partsong-encoder-threads-v1";
 let tuned;
 function tunedThreads() {
   try {
+    if (new URLSearchParams(location.search).get("tune") === "1" && !tunedThreads.cleared) {
+      tunedThreads.cleared = true; // ?tune=1: measure again on this open
+      localStorage.removeItem(TUNED_THREADS);
+    }
     return JSON.parse(localStorage.getItem(TUNED_THREADS))?.threads;
   } catch {
     return undefined;
+  }
+}
+function tunedResult() {
+  try {
+    const t = JSON.parse(localStorage.getItem(TUNED_THREADS));
+    return t && `${t.threads} (${Object.entries(t.ms ?? {}).map(([n, ms]) => `${n}: ${ms} ms`).join(" · ")})`;
+  } catch {
+    return "";
   }
 }
 function tuneReader() {

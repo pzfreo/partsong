@@ -198,9 +198,11 @@ async function decoderModule() {
 let encoderThreads;
 let tuning;
 
-// Times the exact encoder once at each thread count this device could use and
-// picks the fewest within 10% of the fastest. Results are the same whatever the
-// count, so this only chooses speed. About 10 s on a phone, once.
+// Times the exact encoder at each thread count this device could use, twice
+// (in order, then reversed, so a phone warming up doesn't favour one end),
+// keeps each count's faster time and picks the fewest threads within 10% of
+// the fastest. Results are the same whatever the count, so this only chooses
+// speed. About 20 s on a phone, once.
 async function tune() {
   const counts = [2, 3, 4, 6, 8].filter((n) => n <= (navigator.hardwareConcurrency || 1));
   if (!self.crossOriginIsolated || !counts.length) return { threads: null };
@@ -212,8 +214,9 @@ async function tune() {
   const file = () => (fused ? "omr/partsong_omr_threads_fused.wasm" : "omr/partsong_omr_threads.wasm");
   let mod = await WebAssembly.compileStreaming(fetch(file() + location.search));
   const ms = {};
-  for (let i = 0; i < counts.length; i++) {
-    const n = counts[i];
+  const order = [...counts, ...[...counts].reverse()];
+  for (let i = 0; i < order.length; i++) {
+    const n = order[i];
     const pool = await EncoderPool.create(mod, { threads: n });
     try {
       const e = pool.exports;
@@ -234,7 +237,7 @@ async function tune() {
       if (i === 0) e.encoder_run(encoder, img, ctx); // warm-up, once
       const t0 = performance.now();
       if (!e.encoder_run(encoder, img, ctx)) throw new Error("the encoder failed");
-      ms[n] = Math.round(performance.now() - t0);
+      ms[n] = Math.min(ms[n] ?? Infinity, Math.round(performance.now() - t0));
       e.encoder_drop(encoder);
     } finally {
       await pool.close();
