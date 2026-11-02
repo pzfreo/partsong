@@ -182,7 +182,13 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-top: 2px solid var(--gold);
 }
 .markup-bar[hidden] { display: none; }
-.markup-bar p { flex: 1; margin: 0; font-size: 0.92rem; }
+/* Text across the top, buttons in a row beneath: beside the buttons, the text
+   became a tall narrow column on phones with large text. */
+.markup-bar { flex-wrap: wrap; gap: 8px 12px; }
+.markup-bar p { flex: 1 1 100%; margin: 0; font-size: 0.92rem; }
+.markup-bar button { flex: 1; }
+/* The current-bar highlight would look like part of the marking. */
+body.marking .photo-list .bar { display: none; }
 body.marking .transport { display: none; }
 select { min-height: 40px; font: inherit; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
 .link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; font-weight: 400; }

@@ -1564,7 +1564,7 @@ function renderPartChoice() {
   $("auto-part").hidden = marked > 0;
   $("marked-part").hidden = marked === 0;
   $("marked-count").textContent = `${marked} of ${score.systems.length} systems`;
-  $("tap-hint").textContent = fixing ? "Tap the top staff of a system, then its bottom staff." : marking ? "Tap the staff you sing in each system." : "Tap a bar to start from there.";
+  $("tap-hint").textContent = fixing ? "Numbered boxes show how Partsong grouped each page's staves. Where a system is split or merged, tap its top staff, then its bottom staff." : marking ? "Tap the staff you sing in each system." : "Tap a bar to start from there.";
 }
 
 // The sound is a preference for this device, not part of a score.
