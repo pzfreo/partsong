@@ -1,9 +1,9 @@
 import {arithmetic} from './encoder_gpu_math.mjs';
 
 export const entries = ['matmul', 'conv', 'depthwise', 'norm', 'activation', 'scale', 'add', 'position'];
-// Default limits only: 64 invocations, < 2 KiB workgroup storage, four storage
+// Default limits only: 64 invocations, < 13 KiB workgroup storage, four storage
 // bindings and one 64-byte uniform. No optional arithmetic features required.
-export function shaderSource({diagnosticUnguarded = false} = {}) {
+export function shaderSource({diagnosticUnguarded = false, legacy = false} = {}) {
   let math = arithmetic;
   if (diagnosticUnguarded) {
     // Benchmark control only. The production host never selects this program.
@@ -24,14 +24,17 @@ struct Params {
  h:u32, w:u32, c:u32, kernel:u32, stride:u32, pad:u32, ow:u32,
  math_count:u32, round_mask:u32,
 }
-@group(0) @binding(0) var<storage,read> a:array<u32>;
+@group(0) @binding(0) var<storage,read> a:array<${legacy?'u32':'vec4<u32>'}>;
 @group(0) @binding(1) var<storage,read> weights:array<vec4<u32>>;
 @group(0) @binding(2) var<storage,read> residual:array<u32>;
 @group(0) @binding(3) var<storage,read_write> output:array<u32>;
 @group(0) @binding(4) var<uniform> p:Params;
 @group(0) @binding(5) var<storage,read_write> guard:array<atomic<u32>>;
 ${math}
-fn load_a(i:u32)->f32 { return bitcast<f32>(a[i]); }
+fn word_a(i:u32)->u32 { return ${legacy?'a[i]':'a[i>>2u][i&3u]'}; }
+fn load_a(i:u32)->f32 { return bitcast<f32>(word_a(i)); }
+// Call only on a four-word-aligned offset with all four words in bounds.
+fn a4(i:u32)->vec4<f32> { return ${legacy?'vec4<f32>(load_a(i),load_a(i+1u),load_a(i+2u),load_a(i+3u))':'bitcast<vec4<f32>>(a[i>>2u])'}; }
 fn load_w(i:u32)->f32 { return bitcast<f32>(weights[i>>2u][i&3u]); }
 // All packed fields and matrix columns are four-float aligned by the plan.
 fn w4(i:u32)->vec4<f32> { return bitcast<vec4<f32>>(weights[i>>2u]); }
@@ -40,7 +43,173 @@ fn store4(i:u32,v:vec4<f32>) {
  output[i+2u]=bitcast<u32>(inspect(v.z));output[i+3u]=bitcast<u32>(inspect(v.w));
 }
 fn finish() { if (faults!=0u) { atomicOr(&guard[0],faults); } }
-@compute @workgroup_size(64) fn matmul(@builtin(global_invocation_id) id:vec3<u32>) {
+${legacy ? legacyKernels : tiledKernels}
+@compute @workgroup_size(64) fn activation(@builtin(global_invocation_id) id:vec3<u32>){
+ let start=id.x*4u;if(start>=p.rows*p.n){return;}
+ for(var j=0u;j<4u;j++){output[start+j]=bitcast<u32>(gelu_cpu(inspect(bitcast<f32>(output[start+j]))));}finish();
+}
+@compute @workgroup_size(64) fn scale(@builtin(global_invocation_id) id:vec3<u32>){
+ let start=id.x*4u;if(start>=p.rows*p.n){return;}
+ for(var j=0u;j<4u;j++){let i=start+j;output[i]=bitcast<u32>(times(inspect(bitcast<f32>(output[i])),load_w(p.weights+i%p.n)));}finish();
+}
+@compute @workgroup_size(64) fn add(@builtin(global_invocation_id) id:vec3<u32>){
+ let start=id.x*4u;if(start>=p.rows*p.n){return;}
+ for(var j=0u;j<4u;j++){let i=start+j;output[i]=bitcast<u32>(plus(load_a(i),inspect(bitcast<f32>(residual[i]))));}finish();
+}
+@compute @workgroup_size(64) fn position(@builtin(global_invocation_id) id:vec3<u32>){
+ let start=id.x*4u;if(start>=p.rows*p.n){return;}
+ for(var j=0u;j<4u;j++){let i=start+j;output[i]=bitcast<u32>(plus(inspect(bitcast<f32>(output[i])),load_w(p.weights+i)));}finish();
+}
+// vec4<u32> records: operation, a bits, b bits, c bits. Per-case flags are
+// returned beside the output, so a guard can never disguise a failed probe.
+@compute @workgroup_size(64) fn math_probe(@builtin(global_invocation_id) id:vec3<u32>){
+ let i=id.x;if(i>=p.math_count){return;}
+ let kind=word_a(i*4u);
+ var x=probe_word(word_a(i*4u+1u));var y=probe_word(word_a(i*4u+2u));var z=probe_word(word_a(i*4u+3u));
+ if(kind!=1u && kind!=2u){x=inspect(x);y=inspect(y);z=inspect(z);}
+ var value:f32;
+ switch(kind){
+  case 0u:{value=fused(x,y,z);}case 1u:{value=divide(x,y);}case 2u:{value=square_root(x);}
+  case 3u:{value=erf_cpu(x);}case 4u:{value=gelu_cpu(x);}case 5u:{value=erf_exp(x);}
+  case 6u:{value=plus(x,y);}case 7u:{value=times(x,y);}case 8u:{value=minus(x,y);}
+  default:{faults|=UNCERTIFIED;value=0.0;}
+ }
+ output[i*2u]=bitcast<u32>(value);output[i*2u+1u]=faults;finish();
+}
+fn invalid_word(word:u32)->bool {
+ let m=word&0x7fffffffu;var invalid=false;
+ if(m>0u&&m<0x800000u){faults|=SUBNORMAL;invalid=true;}
+ if(m>=0x7f800000u){faults|=NONFINITE;invalid=true;}
+ if(m>0x4f800000u){faults|=DOMAIN;invalid=true;}
+ return invalid;
+}
+@compute @workgroup_size(64) fn weights_scan(@builtin(global_invocation_id) id:vec3<u32>){
+ // A second grid dimension also accommodates a full 128 MiB default binding.
+ let i=id.x+id.y*(65535u*64u);if(i>=p.math_count/4u){return;}
+ let word=weights[i];
+ let x=invalid_word(word.x);let y=invalid_word(word.y);let z=invalid_word(word.z);let w=invalid_word(word.w);
+ finish();
+}
+@compute @workgroup_size(64) fn image_scan(@builtin(global_invocation_id) id:vec3<u32>){
+ let start=id.x*4u;if(start>=p.math_count){return;}
+ for(var j=0u;j<4u;j++){let i=start+j;if(invalid_word(output[i])){output[i]=0u;}}
+ finish();
+}
+`;
+}
+
+// Bind only statically used resources. In-place kernels read/write binding 3;
+// they never alias it with a read-only binding in a WebGPU usage scope.
+export const bindings = [[0,1,3,4,5],[0,1,3,4,5],[0,1,3,4,5],[0,1,3,4,5],
+  [3,4,5],[1,3,4,5],[0,2,3,4,5],[1,3,4,5]];
+export function dispatchCount(q,{legacy=false}={}) {
+  if(legacy)return q[0]===3?q[1]:Math.ceil(q[1]*q[3]/4/64);
+  if(q[0]<2)return Math.ceil(q[1]/16)*Math.ceil(q[3]/32);
+  if(q[0]===2)return Math.ceil(q[7]/4)*Math.ceil(q[8]/4)*Math.ceil(q[9]/16);
+  return q[0]===3?Math.ceil(q[1]/64):Math.ceil(q[1]*q[3]/4/64);
+}
+
+// 16 rows x 32 columns, K=16 staging. Each lane owns two independent vec4
+// outputs. No partial sum crosses lanes or tiles: K is always ascending.
+const tiledKernels = `
+var<workgroup> tile_a:array<vec4<f32>,64>;
+var<workgroup> tile_b:array<vec4<f32>,128>;
+fn gather_patch(row:u32,k:u32)->f32 {
+ let channel=k/(p.kernel*p.kernel);let ky=(k/p.kernel)%p.kernel;let kx=k%p.kernel;
+ let iy=i32((row/p.ow)*p.stride+ky)-i32(p.pad);
+ let ix=i32((row%p.ow)*p.stride+kx)-i32(p.pad);
+ if(iy<0 || ix<0 || iy>=i32(p.h) || ix>=i32(p.w)){return 0.0;}
+ return load_a((u32(iy)*p.w+u32(ix))*p.c+channel);
+}
+fn dense(group:u32,lane:u32,is_conv:bool){
+ let tiles=(p.n+31u)/32u;let row_base=(group/tiles)*16u;let col_base=(group%tiles)*32u;
+ let row=lane/8u;let cv=lane%8u;let col=col_base+cv*4u;
+ let stem=is_conv&&p.c==1u;let blocked=is_conv&&!stem;
+ var bias=vec4<f32>(0.0);if(col<p.n){bias=w4(p.bias+col);}
+ var result0=vec4<f32>(0.0);var result1=vec4<f32>(0.0);
+ let block=select(p.k,128u,blocked);
+ for(var start=0u;start<p.k;start+=block){
+   var sum0=vec4<f32>(0.0);var sum1=vec4<f32>(0.0);
+   if(stem){sum0=bias;sum1=bias;}
+   for(var base=start;base<min(start+block,p.k);base+=16u){
+     // One vec4 A load per lane (four channel-major gathers for Conv), and
+     // two vec4 B loads. Padding lanes participate in every barrier.
+     let ar=row_base+lane/4u;let ak=base+(lane%4u)*4u;var av=vec4<f32>(0.0);
+     if(ar<p.rows){
+       if(!is_conv&&ak+3u<p.k&&(ar*p.k+ak)%4u==0u){av=a4(ar*p.k+ak);}
+       else{for(var j=0u;j<4u;j++){if(ak+j<p.k){
+         if(is_conv){av[j]=gather_patch(ar,ak+j);}else{av[j]=load_a(ar*p.k+ak+j);}
+       }}}
+     }
+     tile_a[lane]=av;
+     for(var i=lane;i<128u;i+=64u){
+       let bk=base+i/8u;let bc=col_base+(i%8u)*4u;var bv=vec4<f32>(0.0);
+       if(bk<p.k&&bc<p.n){bv=w4(p.weights+bk*p.n+bc);}tile_b[i]=bv;
+     }
+     workgroupBarrier();
+     for(var k=0u;k<min(16u,p.k-base);k++){
+       let bv=tile_b[k*8u+cv];
+       sum0=fused4(vec4<f32>(tile_a[row*4u+k/4u][k%4u]),bv,sum0);
+       sum1=fused4(vec4<f32>(tile_a[(row+8u)*4u+k/4u][k%4u]),bv,sum1);
+     }
+     workgroupBarrier();
+   }
+   if(blocked){result0=plus4(result0,sum0);result1=plus4(result1,sum1);}
+   else{result0=sum0;result1=sum1;}
+ }
+ if(!stem){result0=plus4(result0,bias);result1=plus4(result1,bias);}
+ if(col<p.n){
+   if(row_base+row<p.rows){store4((row_base+row)*p.n+col,result0);}
+   if(row_base+row+8u<p.rows){store4((row_base+row+8u)*p.n+col,result1);}
+ }
+ finish();
+}
+@compute @workgroup_size(64) fn matmul(@builtin(workgroup_id) g:vec3<u32>,@builtin(local_invocation_index) lane:u32){dense(g.x,lane,false);}
+@compute @workgroup_size(64) fn conv(@builtin(workgroup_id) g:vec3<u32>,@builtin(local_invocation_index) lane:u32){dense(g.x,lane,true);}
+
+// A 4x4 spatial tile, 16 channels: cache its (up to) 10x10 halo and all 49
+// weights. Reuse across pixels, retaining every padded-zero FMA in ky/kx order.
+var<workgroup> dw_a:array<vec4<f32>,400>;
+var<workgroup> dw_b:array<vec4<f32>,196>;
+@compute @workgroup_size(64) fn depthwise(@builtin(workgroup_id) g:vec3<u32>,@builtin(local_invocation_index) lane:u32){
+ let channels=(p.c+15u)/16u;let spatial=g.x/channels;let ch=(g.x%channels)*16u;
+ let tiles_w=(p.w+3u)/4u;let y0=(spatial/tiles_w)*4u;let x0=(spatial%tiles_w)*4u;
+ let extent=4u+p.kernel-1u;
+ for(var i=lane;i<extent*extent*4u;i+=64u){
+   let pixel=i/4u;let c=ch+(i%4u)*4u;let y=i32(y0+pixel/extent)-i32(p.pad);let x=i32(x0+pixel%extent)-i32(p.pad);
+   var v=vec4<f32>(0.0);
+   if(y>=0&&x>=0&&y<i32(p.h)&&x<i32(p.w)&&c<p.c){let offset=(u32(y)*p.w+u32(x))*p.c+c;v=a4(offset);}
+   dw_a[i]=v;
+ }
+ for(var i=lane;i<p.kernel*p.kernel*4u;i+=64u){let c=ch+(i%4u)*4u;var v=vec4<f32>(0.0);if(c<p.c){v=w4(p.weights+(i/4u)*p.c+c);}dw_b[i]=v;}
+ workgroupBarrier();
+ let pixel=lane/4u;let cv=lane%4u;let y=y0+pixel/4u;let x=x0+pixel%4u;let c=ch+cv*4u;
+ if(y>=p.h||x>=p.w||c>=p.c){return;}
+ var sum=vec4<f32>(0.0);
+ for(var ky=0u;ky<p.kernel;ky++){for(var kx=0u;kx<p.kernel;kx++){
+   sum=fused4(dw_a[((pixel/4u+ky)*extent+pixel%4u+kx)*4u+cv],dw_b[(ky*p.kernel+kx)*4u+cv],sum);
+ }}
+ store4((y*p.w+x)*p.c+c,plus4(sum,w4(p.bias+c)));finish();
+}
+
+// A whole Welford row belongs to one invocation. This replaces 63 waiting
+// lanes per row with 64 independent rows, without parallelizing any reduction.
+@compute @workgroup_size(64) fn norm(@builtin(global_invocation_id) id:vec3<u32>){
+ let row=id.x;if(row>=p.rows){return;}var mean=0.0;var m2=0.0;
+ for(var j=0u;j<p.n;j++){
+   let value=load_a(row*p.n+j);let delta=minus(value,mean);
+   mean=plus(mean,inspect(divide(delta,f32(j+1u))));m2=fused(delta,minus(value,mean),m2);
+ }
+ let row_std=inspect(square_root(plus(inspect(divide(m2,f32(p.n))),constructed(p.epsilon))));
+ for(var j=0u;j<p.n;j++){
+   output[row*p.n+j]=bitcast<u32>(fused(inspect(divide(minus(load_a(row*p.n+j),mean),row_std)),load_w(p.weights+j),load_w(p.bias+j)));
+ }
+ finish();
+}
+`;
+
+// Previous, externally qualified schedule: diagnostic comparison only.
+const legacyKernels = `@compute @workgroup_size(64) fn matmul(@builtin(global_invocation_id) id:vec3<u32>) {
  let i=id.x; if(i>=p.rows*(p.n/4u)) {return;}
  let row=i/(p.n/4u);let col=(i%(p.n/4u))*4u;
  var sum=vec4<f32>(0.0);
@@ -108,62 +277,4 @@ var<workgroup> row_std:f32;
  }
  finish();
 }
-@compute @workgroup_size(64) fn activation(@builtin(global_invocation_id) id:vec3<u32>){
- let start=id.x*4u;if(start>=p.rows*p.n){return;}
- for(var j=0u;j<4u;j++){output[start+j]=bitcast<u32>(gelu_cpu(inspect(bitcast<f32>(output[start+j]))));}finish();
-}
-@compute @workgroup_size(64) fn scale(@builtin(global_invocation_id) id:vec3<u32>){
- let start=id.x*4u;if(start>=p.rows*p.n){return;}
- for(var j=0u;j<4u;j++){let i=start+j;output[i]=bitcast<u32>(times(inspect(bitcast<f32>(output[i])),load_w(p.weights+i%p.n)));}finish();
-}
-@compute @workgroup_size(64) fn add(@builtin(global_invocation_id) id:vec3<u32>){
- let start=id.x*4u;if(start>=p.rows*p.n){return;}
- for(var j=0u;j<4u;j++){let i=start+j;output[i]=bitcast<u32>(plus(load_a(i),inspect(bitcast<f32>(residual[i]))));}finish();
-}
-@compute @workgroup_size(64) fn position(@builtin(global_invocation_id) id:vec3<u32>){
- let start=id.x*4u;if(start>=p.rows*p.n){return;}
- for(var j=0u;j<4u;j++){let i=start+j;output[i]=bitcast<u32>(plus(inspect(bitcast<f32>(output[i])),load_w(p.weights+i)));}finish();
-}
-// vec4<u32> records: operation, a bits, b bits, c bits. Per-case flags are
-// returned beside the output, so a guard can never disguise a failed probe.
-@compute @workgroup_size(64) fn math_probe(@builtin(global_invocation_id) id:vec3<u32>){
- let i=id.x;if(i>=p.math_count){return;}
- let kind=a[i*4u];
- var x=probe_word(a[i*4u+1u]);var y=probe_word(a[i*4u+2u]);var z=probe_word(a[i*4u+3u]);
- if(kind!=1u && kind!=2u){x=inspect(x);y=inspect(y);z=inspect(z);}
- var value:f32;
- switch(kind){
-  case 0u:{value=fused(x,y,z);}case 1u:{value=divide(x,y);}case 2u:{value=square_root(x);}
-  case 3u:{value=erf_cpu(x);}case 4u:{value=gelu_cpu(x);}case 5u:{value=erf_exp(x);}
-  case 6u:{value=plus(x,y);}case 7u:{value=times(x,y);}case 8u:{value=minus(x,y);}
-  default:{faults|=UNCERTIFIED;value=0.0;}
- }
- output[i*2u]=bitcast<u32>(value);output[i*2u+1u]=faults;finish();
-}
-fn invalid_word(word:u32)->bool {
- let m=word&0x7fffffffu;var invalid=false;
- if(m>0u&&m<0x800000u){faults|=SUBNORMAL;invalid=true;}
- if(m>=0x7f800000u){faults|=NONFINITE;invalid=true;}
- if(m>0x4f800000u){faults|=DOMAIN;invalid=true;}
- return invalid;
-}
-@compute @workgroup_size(64) fn weights_scan(@builtin(global_invocation_id) id:vec3<u32>){
- // A second grid dimension also accommodates a full 128 MiB default binding.
- let i=id.x+id.y*(65535u*64u);if(i>=p.math_count/4u){return;}
- let word=weights[i];
- let x=invalid_word(word.x);let y=invalid_word(word.y);let z=invalid_word(word.z);let w=invalid_word(word.w);
- finish();
-}
-@compute @workgroup_size(64) fn image_scan(@builtin(global_invocation_id) id:vec3<u32>){
- let start=id.x*4u;if(start>=p.math_count){return;}
- for(var j=0u;j<4u;j++){let i=start+j;if(invalid_word(output[i])){output[i]=0u;}}
- finish();
-}
 `;
-}
-
-// Bind only statically used resources. In-place kernels read/write binding 3;
-// they never alias it with a read-only binding in a WebGPU usage scope.
-export const bindings = [[0,1,3,4,5],[0,1,3,4,5],[0,1,3,4,5],[0,1,3,4,5],
-  [3,4,5],[1,3,4,5],[0,2,3,4,5],[1,3,4,5]];
-export function dispatchCount(q) {return q[0] === 3 ? q[1] : Math.ceil(q[1]*q[3]/4/64);}

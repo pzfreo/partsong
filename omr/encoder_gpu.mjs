@@ -26,7 +26,10 @@ export function specialBits(value) {
 }
 function storage(device, valueOrSize, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST) {
   const data=typeof valueOrSize === 'number' ? null : bytes(valueOrSize);
-  const buffer=device.createBuffer({size:Math.max(4,data?.byteLength??valueOrSize),usage,mappedAtCreation:!!data});
+  // A vec4 runtime storage array needs a complete final vector, even when a
+  // diagnostic input ends with 1..3 scalar words (e.g. the 19x47 load test).
+  // WebGPU zero-initializes the padding. Readbacks still return requested bytes.
+  const buffer=device.createBuffer({size:Math.max(16,Math.ceil((data?.byteLength??valueOrSize)/16)*16),usage,mappedAtCreation:!!data});
   if(data) {new Uint8Array(buffer.getMappedRange()).set(data);buffer.unmap();}
   return buffer;
 }
@@ -34,13 +37,13 @@ function uniform(device,q) {return storage(device,new Uint32Array(q),GPUBufferUs
 export async function readBuffer(device,source,size,offset=0) {
   const target=storage(device,size,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ);
   try {const cmd=device.createCommandEncoder();cmd.copyBufferToBuffer(source,offset,target,0,size);device.queue.submit([cmd.finish()]);
-    await target.mapAsync(GPUMapMode.READ);return target.getMappedRange().slice(0);
+    await target.mapAsync(GPUMapMode.READ);return target.getMappedRange().slice(0,size);
   } finally {target.destroy();}
 }
 
 class Program {
-  static async create(device,diagnosticUnguarded=false) {
-    const code=shaderSource({diagnosticUnguarded}), module=device.createShaderModule({code});
+  static async create(device,diagnosticUnguarded=false,legacy=false) {
+    const code=shaderSource({diagnosticUnguarded,legacy}), module=device.createShaderModule({code});
     const info=await module.getCompilationInfo();
     const errors=info.messages.filter(m=>m.type==='error');if(errors.length) throw Error(JSON.stringify(errors));
     const names=[...entries,'math_probe','weights_scan','image_scan'];
@@ -48,9 +51,9 @@ class Program {
     // control even if a compiler proves its fault accumulator stays zero.
     const indices=names.map((_,kind)=>kind===8?[0,3,4,5]:kind===9?[1,4,5]:kind===10?[3,4,5]:bindings[kind]);
     const layouts=indices.map(list=>device.createBindGroupLayout({entries:list.map(binding=>({binding,visibility:GPUShaderStage.COMPUTE,
-      buffer:{type:binding===4?'uniform':binding===3||binding===5?'storage':'read-only-storage',minBindingSize:binding===4?64:binding===1?16:4}}))}));
+      buffer:{type:binding===4?'uniform':binding===3||binding===5?'storage':'read-only-storage',minBindingSize:binding===4?64:binding===1||(binding===0&&!legacy)?16:4}}))}));
     const pipelines=await Promise.all(names.map((entryPoint,i)=>device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[layouts[i]]}),compute:{module,entryPoint}})));
-    return Object.assign(new Program(),{device,pipelines,indices,layouts,diagnosticUnguarded});
+    return Object.assign(new Program(),{device,pipelines,indices,layouts,diagnosticUnguarded,legacy});
   }
   group(kind,resources) {
     return this.device.createBindGroup({layout:this.layouts[kind],entries:this.indices[kind].map(binding=>({binding,resource:{buffer:resources[binding]}}))});
@@ -59,7 +62,7 @@ class Program {
     const pass=command.beginComputePass(timestampWrites?{timestampWrites}:{});
     pass.setPipeline(this.pipelines[kind]);pass.setBindGroup(0,group);
     if(kind===9){const groups=Math.ceil(q[14]/4/64);pass.dispatchWorkgroups(Math.min(65535,groups),Math.ceil(groups/65535));}
-    else pass.dispatchWorkgroups(kind===8?Math.ceil(q[14]/64):kind===10?Math.ceil(q[14]/4/64):dispatchCount(q));pass.end();
+    else pass.dispatchWorkgroups(kind===8?Math.ceil(q[14]/64):kind===10?Math.ceil(q[14]/4/64):dispatchCount(q,{legacy:this.legacy}));pass.end();
   }
 }
 
@@ -115,6 +118,7 @@ export class EncoderGPU {
       self.weights=storage(self.device,weights);self.resources.push(self.weights);
       self.status.operand_guard='GPU raw-bit load-time weights scan; per-staff sanitizing image scan';
       const compile=performance.now();self.program=await Program.create(self.device);self.status.compile_ms=performance.now()-compile;
+      self.status.schedule='dense 16x32/K16, depthwise 4x4/C16, one norm row per invocation';
       self.status.self_test=await self.selfTest();
       if(!self.status.self_test.passed) throw Error('GPU known-answer self-test failed');
       self.buffers=self.meta.buffers.map(n=>storage(self.device,n*4));self.resources.push(...self.buffers);
@@ -137,11 +141,12 @@ export class EncoderGPU {
   validateLimits() {
     const m=this.meta,l=this.device.limits;
     if(m.abi!==1||m.buffers.length!==7||m.max_channels>384||m.weights%4) throw Error('Unsupported GPU plan ABI');
-    if(l.maxStorageBuffersPerShaderStage<4||l.maxComputeInvocationsPerWorkgroup<64||l.maxComputeWorkgroupSizeX<64||l.maxComputeWorkgroupStorageSize<1568) throw Error('Missing default compute limits');
+    if(l.maxStorageBuffersPerShaderStage<4||l.maxComputeInvocationsPerWorkgroup<64||l.maxComputeWorkgroupSizeX<64||l.maxComputeWorkgroupStorageSize<12608) throw Error('Missing default compute limits');
     for(const n of [...m.buffers,m.weights]) if(n*4>l.maxStorageBufferBindingSize||n*4>l.maxBufferSize) throw Error(`Buffer exceeds device limit: ${n*4}`);
     for(const op of m.ops) {const q=op.params;if(q.length!==16||q[15]!==0||q[0]>7||!q[1]||!q[3]||q[3]%4||(q[0]===3&&q[3]>384)||dispatchCount(q)>l.maxComputeWorkgroupsPerDimension) throw Error(`Unsupported op ${op.name}`);
       if(q[0]<3&&(q[4]%4||q[5]%4))throw Error('Unaligned packed matrix field');
       if(q[0]<3&&q[2]>1536)throw Error('GPU prefix-bound certificate requires K<=1536');
+      if(q[0]===2&&(q[10]>7||!q[10]||q[1]!==q[7]*q[8]||q[3]!==q[9]))throw Error('Unsupported depthwise tile shape');
       if(q[0]===3&&(specialBits(new Uint32Array([q[6]]))||!(new Float32Array(new Uint32Array([q[6]]).buffer)[0]>0)))throw Error('GPU norm requires finite positive bounded epsilon');}
   }
   emitStatus(){try{this.onReport({...this.status});}catch(error){this.status.report_error=String(error);}}
@@ -247,6 +252,64 @@ export class EncoderGPU {
       return {backend:'gpu',...stats};
     } catch(error) {if(scoped){scoped=false;try{await popErrors(this.device);}catch{}}if(fallingBack)throw error;this.disable(String(error.stack||error));this.releaseGPU();return fallback(image,context,this.status.reason,{wall_ms:performance.now()-start});}
     finally {this.busy=false;}
+  }
+  // Diagnostic timing control only; never writes a context or affects fallback.
+  async profile(image,{trials=3,reference=null}={}) {
+    if(!this.enabled||!this.timestamp||this.busy)return {available:false,reason:'Need idle qualified GPU with timestamp-query'};
+    if(!Number.isInteger(trials)||trials<1||trials>20)throw Error('profile trials must be 1..20');
+    this.busy=true;const d=this.device,live=[];let scoped=false;
+    try {
+      pushErrors(d);scoped=true;
+      const compile=performance.now(),control=await Program.create(d,true),legacy=await Program.create(d,false,true),control_compile_ms=performance.now()-compile;
+      const groups=program=>this.ops.map(op=>program.group(op.params[0],[this.buffers[op.input],this.weights,this.buffers[op.residual],this.buffers[op.output],op.q,this.guard]));
+      const variants=[{name:'tiled_guarded',program:this.program,groups:this.ops.map(op=>op.group),guarded:true,legacy:false},
+        {name:'tiled_arithmetic_control',program:control,groups:groups(control),guarded:false,legacy:false},
+        {name:'legacy_guarded',program:legacy,groups:groups(legacy),guarded:true,legacy:true}];
+      const count=2*(this.ops.length+1),queries=d.createQuerySet({type:'timestamp',count});live.push(queries);
+      const resolved=storage(d,count*8,GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC);live.push(resolved);
+      const rows=[],scan=[];let expected=reference instanceof Uint32Array?reference:reference?new Uint32Array(reference):null;
+      for(let trial=-1;trial<trials;trial++)for(let turn=0;turn<variants.length;turn++){
+        const variant=variants[(turn+trial+1)%variants.length],{guarded,program}=variant;
+        // Restore raw input for each control: a preceding guarded run must not
+        // silently sanitize the unguarded control's input.
+        d.queue.writeBuffer(this.buffers[0],0,new Uint32Array(this.e.memory.buffer,image,256*1280).slice());
+        d.queue.writeBuffer(this.guard,0,new Uint32Array(1));
+        const cmd=d.createCommandEncoder();
+        if(guarded)program.dispatch(cmd,10,this.scanParams,program.group(10,[null,null,null,this.buffers[0],this.scanQ,this.guard]),{querySet:queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1});
+        for(let i=0;i<this.ops.length;i++){
+          const op=this.ops[i];program.dispatch(cmd,op.params[0],op.params,variant.groups[i],{querySet:queries,beginningOfPassWriteIndex:2*(i+1),endOfPassWriteIndex:2*(i+1)+1});
+        }
+        // Unwritten scan queries are not resolved in the unguarded control.
+        cmd.resolveQuerySet(queries,guarded?0:2,count-(guarded?0:2),resolved,0);d.queue.submit([cmd.finish()]);
+        const times=new BigUint64Array(await readBuffer(d,resolved,(count-(guarded?0:2))*8));
+        const flags=new Uint32Array(await readBuffer(d,this.guard,4))[0];
+        const actual=new Uint32Array(await readBuffer(d,this.buffers[this.meta.output],this.contextBytes));expected??=actual;
+        const diff=bitDifference(actual,expected),offset=guarded?2:0;
+        const kernels=this.ops.map((op,i)=>({index:i,name:op.name,kind:op.params[0],gpu_ms:Number(times[offset+2*i+1]-times[offset+2*i])/1e6}));
+        if(trial>=0)rows.push({trial,variant:variant.name,legacy:variant.legacy,guarded,flags,...diff,image_scan_ms:guarded?Number(times[1]-times[0])/1e6:0,kernels,
+          dispatch_span_ms:Number(times.at(-1)-times[0])/1e6});
+      }
+      // Weight scanning is a one-time initialization cost, never per-staff.
+      const q=new Uint32Array(16);q[14]=this.meta.weights;const params=uniform(d,q);live.push(params);
+      const group=this.program.group(9,[null,this.weights,null,null,params,this.guard]);
+      for(let trial=-1;trial<trials;trial++){
+        d.queue.writeBuffer(this.guard,0,new Uint32Array(1));const cmd=d.createCommandEncoder();
+        this.program.dispatch(cmd,9,q,group,{querySet:queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1});
+        cmd.resolveQuerySet(queries,0,2,resolved,0);d.queue.submit([cmd.finish()]);
+        const t=new BigUint64Array(await readBuffer(d,resolved,16)),flags=new Uint32Array(await readBuffer(d,this.guard,4))[0];
+        if(trial>=0)scan.push({gpu_ms:Number(t[1]-t[0])/1e6,flags});
+      }
+      const median=xs=>xs.toSorted((a,b)=>a-b)[Math.floor(xs.length/2)],valid=rows.every(r=>!r.flags&&!r.bit_differences)&&scan.every(r=>!r.flags);
+      const kernels=this.ops.map((op,i)=>{const guarded=median(rows.filter(r=>r.guarded&&!r.legacy).map(r=>r.kernels[i].gpu_ms)),arithmetic=median(rows.filter(r=>!r.guarded).map(r=>r.kernels[i].gpu_ms)),old=median(rows.filter(r=>r.legacy).map(r=>r.kernels[i].gpu_ms));
+        return {index:i,name:op.name,kind:op.params[0],guarded_ms:guarded,arithmetic_control_ms:arithmetic,guard_delta_ms:valid?guarded-arithmetic:null,legacy_guarded_ms:old,speedup:valid&&guarded>0?old/guarded:null};});
+      const totals={};for(const k of kernels){const t=totals[k.kind]??={kind:k.kind,kernel:entries[k.kind],guarded_ms:0,arithmetic_control_ms:0,legacy_guarded_ms:0};t.guarded_ms+=k.guarded_ms;t.arithmetic_control_ms+=k.arithmetic_control_ms;t.legacy_guarded_ms+=k.legacy_guarded_ms;}
+      const image_scan_ms=median(rows.filter(r=>r.guarded&&!r.legacy).map(r=>r.image_scan_ms)),guarded_ms=kernels.reduce((n,k)=>n+k.guarded_ms,0)+image_scan_ms,arithmetic_control_ms=kernels.reduce((n,k)=>n+k.arithmetic_control_ms,0);
+      const legacy_guarded_ms=kernels.reduce((n,k)=>n+k.legacy_guarded_ms,0)+median(rows.filter(r=>r.legacy).map(r=>r.image_scan_ms));
+      scoped=false;await popErrors(d);
+      return {available:true,valid,trials,control_compile_ms,kernels,by_kind:Object.values(totals),image_scan_ms,weight_scan_once_ms:median(scan.map(r=>r.gpu_ms)),guarded_ms,arithmetic_control_ms,legacy_guarded_ms,speedup:valid&&guarded_ms>0?legacy_guarded_ms/guarded_ms:null,
+        guard_and_image_delta_ms:valid?guarded_ms-arithmetic_control_ms:null,guard_and_image_fraction:valid?(guarded_ms-arithmetic_control_ms)/guarded_ms:null,rows,weight_scan:scan,
+        policy:'Per-pass timestamps; one warm-up and interleaved trials. Weight scan is a warm scan of resident weights, separate from initialization wall time. Deltas are noisy differential estimates, not additive hardware counters. Control removes wrapper FTZ/domain checks; rounding barriers and certified div/sqrt (including their flags) remain arithmetic. No control output is used for encoding.'};
+    } finally {if(scoped){try{await popErrors(d);}catch{}}for(const b of live)b.destroy();this.busy=false;}
   }
   // Diagnostic timing control only; never writes a context or affects fallback.
   async measureGuardCost(image,{trials=3,reference=null}={}) {
