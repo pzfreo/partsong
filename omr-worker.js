@@ -200,13 +200,16 @@ let encoderThreads;
 let encoderGpu; // from tune(): true/false; undefined (not tuned) tries the GPU
 let tuning;
 
-// Times the exact encoder at each thread count this device could use, twice
+// Times the exact encoder at 2, 3 and 4 threads (as the device allows), twice
 // (in order, then reversed, so a phone warming up doesn't favour one end),
 // keeps each count's faster time and picks the fewest threads within 10% of
 // the fastest. Results are the same whatever the count, so this only chooses
 // speed. About 20 s on a phone, once.
 async function tune() {
-  const counts = [2, 3, 4, 6, 8].filter((n) => n <= (navigator.hardwareConcurrency || 1));
+  // At most 4: timed alone, 6 and 8 threads looked fastest on an Android
+  // phone, but over a whole read they were slower (10 pages: 3 threads
+  // 3 min 57 s, 8 threads 4 min 22 s, 6 threads 4 min 59 s).
+  const counts = [2, 3, 4].filter((n) => n <= (navigator.hardwareConcurrency || 1));
   if (!self.crossOriginIsolated || !counts.length) return { threads: null };
   const { EncoderPool } = await import("./omr/encoder_pool.mjs");
   const bytes = await modelBytes(MODELS[1]);

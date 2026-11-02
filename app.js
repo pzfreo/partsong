@@ -486,7 +486,7 @@ function startWorker() {
 
 // The exact encoder's thread count, measured once on this device (see tune()
 // in omr-worker.js). Bump the key when the encoder's threading changes.
-const TUNED_THREADS = "partsong-encoder-threads-v2"; // v2: also times the GPU encoder
+const TUNED_THREADS = "partsong-encoder-threads-v3"; // v2: also times the GPU encoder; v3: at most 4 threads
 let tuned;
 function tunedThreads() {
   try {
