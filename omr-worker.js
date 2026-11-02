@@ -311,14 +311,15 @@ async function recognise(imageBytes, systemsJson) {
   }
 }
 
-async function init() {
+// noGpu (tests, comparisons): run every model on WASM.
+async function init(noGpu) {
   ort = await import(ORT_URL + "ort.webgpu.min.mjs");
   ort.env.wasm.wasmPaths = ORT_URL;
   ort.env.wasm.numThreads = self.crossOriginIsolated
     ? Math.min(4, navigator.hardwareConcurrency || 1)
     : 1;
   post({ type: "log", msg: `WASM threads: ${ort.env.wasm.numThreads}` });
-  useGpu = !!(self.navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)));
+  useGpu = !noGpu && !!(self.navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)));
   // Same deploy version as this worker (?v=… from scripts/stamp-version.mjs).
   wasmModule = await WebAssembly.compileStreaming(fetch("omr/partsong_omr.wasm" + location.search));
   for (const name of MODELS) {
@@ -331,7 +332,7 @@ let ready;
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
-      ready ??= init();
+      ready ??= init(!!data.noGpu);
       await ready;
     } else if (data.type === "recognise") {
       await ready;
