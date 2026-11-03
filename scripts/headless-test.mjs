@@ -76,7 +76,9 @@ if (driveFile) {
   const { readFileSync } = await import("node:fs");
   const code = readFileSync(driveFile, "utf8");
   send("Runtime.evaluate", {
-    expression: `window.shot = (full = true) => new Promise(r => { window.__shotDone = r; console.log(full ? "__SHOT__" : "__SHOTVIEW__"); }); (async () => { ${code} })().catch(e => { window.result = { error: String(e.stack || e) }; });`,
+    // Reading stops at the systems check until Read music there is tapped:
+    // tap it, unless the drive checks the systems itself (window.manualCheck).
+    expression: `setInterval(() => { if (window.manualCheck) return; for (const d of [document, ...[...document.querySelectorAll("iframe")].map((f) => { try { return f.contentDocument; } catch {} })]) { const b = d?.getElementById("check-done"); if (b && !d.getElementById("systems-check").hidden) b.click(); } }, 500); window.shot = (full = true) => new Promise(r => { window.__shotDone = r; console.log(full ? "__SHOT__" : "__SHOTVIEW__"); }); (async () => { ${code} })().catch(e => { window.result = { error: String(e.stack || e) }; });`,
   });
 }
 

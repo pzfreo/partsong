@@ -692,7 +692,6 @@ async function resumeUnfinished() {
 }
 
 function scanEntry(pending) {
-  const { systemsChecked, ...settings } = scanSettings;
   return {
     id: scanId,
     title: $("scan-name").value.trim() || `Scan ${new Date().toLocaleDateString()}`,
@@ -700,9 +699,7 @@ function scanEntry(pending) {
     images: pages.map((p) => p.blob),
     pages: pages.map((p) => p.xml ?? null),
     pending,
-    ...settings,
-    // Only while reading: a reading carried on later doesn't check again.
-    ...(pending && systemsChecked ? { systemsChecked } : {}),
+    ...scanSettings,
   };
 }
 
@@ -878,11 +875,10 @@ $("recognise").onclick = () => (reading ? stopReading?.() : readScan());
 
 const NO_MUSIC = /No (staffs|noteheads) found\s*$/;
 
-// ---------- checking the systems before reading ----------
+// ---------- two phases: the systems on every page, then the staves ----------
 // Finding each page's systems is quick; reading every staff is the slow part.
-// So first the systems on every page still to read, and if a page's look
-// wrong (a system with more or fewer staves than most), those pages are shown
-// to fix as Check and fix systems does, before reading.
+// So the systems come first, shown on every page to check (as Check and fix
+// systems does), and the staves are read once you tap Read music.
 
 // Pages (indexes) whose systems give other parts than most pages' do.
 function doubtfulPages(todo) {
@@ -890,7 +886,7 @@ function doubtfulPages(todo) {
   const freq = new Map();
   for (const i of todo) if (shape(i)) freq.set(shape(i), (freq.get(shape(i)) ?? 0) + 1);
   const usual = [...freq].sort((a, b) => b[1] - a[1])[0]?.[0];
-  return todo.filter((i) => !scanSettings.systemHints?.[i] && shape(i) && shape(i) !== usual);
+  return todo.filter((i) => shape(i) && shape(i) !== usual);
 }
 
 async function checkSystems(stopped) {
@@ -912,33 +908,35 @@ async function checkSystems(stopped) {
   const found = `Systems (staves in each): ${todo.map((i) => `p${i + 1} ${(pages[i].layout ?? []).map((sys) => sys.length).join(",") || "none"} parts ${pages[i].parts?.join("") ?? "-"}`).join("; ")}`;
   console.log("[omr]", found);
   remember(readerLog, found, 40);
-  const doubtful = doubtfulPages(todo);
-  if (doubtful.length) {
-    track("systems-check");
-    showCheck(doubtful.map((i) => pages[i]));
+  const shown = todo.filter((i) => pages[i].layout);
+  if (shown.length) {
+    setPageStatus("");
+    const hints = await Promise.race([askToCheck(shown, doubtfulPages(todo)), stopped]).finally(() => ($("systems-check").hidden = true));
+    if (Object.keys(hints).length) {
+      track("systems-check-fixed");
+      scanSettings.systemHints = { ...(scanSettings.systemHints ?? {}), ...hints };
+    }
   }
   scanSettings.systemsChecked = true;
   if (scanId) await db.update(scanId, { systemHints: scanSettings.systemHints, systemsChecked: true }).catch(() => {});
 }
 
-// Shows those pages with their systems while the rest is read. A change
-// applies at once: a page not read yet is read with it, one already read is
-// read again at the end.
-function showCheck(shown) {
-  const list = $("check-list");
-  list.replaceChildren(
-    ...shown.flatMap((page) => {
-      const n = pages.indexOf(page) + 1;
-      const label = Object.assign(document.createElement("p"), { className: "check-page", textContent: `Page ${n}` });
+// Shows the pages with their systems; resolves with the systems of the pages
+// changed (page -> [top, bottom] ranges) when Read music is tapped.
+function askToCheck(shown, doubtful) {
+  const drafts = {};
+  $("check-list").replaceChildren(
+    ...shown.flatMap((i) => {
+      const label = Object.assign(document.createElement("p"), { className: "check-page", textContent: `Page ${i + 1}${doubtful.includes(i) ? ": looks unusual" : ""}` });
       const div = Object.assign(document.createElement("div"), { className: "page" });
       const img = document.createElement("img");
-      img.alt = `Page ${n}`;
-      img.src = page.url;
+      img.alt = `Page ${i + 1}`;
+      img.src = pages[i].url;
       const svg = document.createElementNS(SVG, "svg");
       svg.setAttribute("preserveAspectRatio", "none");
       const g = document.createElementNS(SVG, "g");
       svg.append(g);
-      const d = pageRows(0, page.layout.map((staves, index) => ({ index, staves: staves.map(([, y0, , y1]) => ({ y0, y1 })) })));
+      const d = (drafts[i] = pageRows(i, pages[i].layout.map((staves, index) => ({ index, staves: staves.map(([, y0, , y1]) => ({ y0, y1 })) }))));
       img.onload = () => {
         const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
         d.w = img.naturalWidth * scale;
@@ -947,36 +945,35 @@ function showCheck(shown) {
         drawGaps(g, d, d.w);
       };
       svg.onclick = (e) => {
-        const i = pages.indexOf(page);
-        if (!d.w || i < 0) return;
+        if (!d.w) return;
         const rect = svg.getBoundingClientRect();
-        if (!toggleGap(d, ((e.clientY - rect.top) / rect.height) * d.h)) return;
-        drawGaps(g, d, d.w);
-        const hints = { ...(scanSettings.systemHints ?? {}) };
-        if (d.splits.some((x, k) => x !== d.initial[k])) hints[i] = fixBands(d, d.h);
-        else delete hints[i];
-        scanSettings.systemHints = hints;
-        if (page.xml || page === readingPage) page.redo = true;
-        track("systems-check-fixed");
-        if (scanId) db.update(scanId, { systemHints: hints }).catch(() => {});
+        if (toggleGap(d, ((e.clientY - rect.top) / rect.height) * d.h)) drawGaps(g, d, d.w);
       };
       div.append(img, svg);
       return [label, div];
     }),
   );
-  const which = shown.map((page) => pages.indexOf(page) + 1);
-  const named = which.length > 1 ? `pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)}` : `page ${which[0]}`;
+  const which = doubtful.map((i) => i + 1);
+  const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
   $("check-intro").textContent =
-    `While it reads, check the systems on ${named}: they look unusual. ` +
-    "Red lines are where Partsong thinks one system ends and the next begins. If one is wrong, tap between the two staves to add or remove a line.";
+    "Check the systems before Partsong reads the music. Red lines are where it thinks one system ends and the next begins. " +
+    "If one is wrong, tap between the two staves to add or remove a line." +
+    (which.length ? ` ${named} unusual.` : "");
   $("systems-check").hidden = false;
+  $("systems-check").scrollIntoView({ behavior: "smooth", block: "start" });
+  return new Promise((resolve) => {
+    $("check-done").onclick = () => {
+      const hints = {};
+      for (const [i, d] of Object.entries(drafts)) if (d.h && d.splits.some((x, k) => x !== d.initial[k])) hints[i] = fixBands(d, d.h);
+      resolve(hints);
+    };
+  });
 }
 
 // While reading, the Read music button stops it: the reader is shut down at
 // once (even mid-page; it starts again for the next read). Pages already read
 // are kept, and Read music carries on from the next one.
 let stopReading = null;
-let readingPage = null;
 class Stopped extends Error {}
 
 async function readScan() {
@@ -1005,17 +1002,13 @@ async function readScan() {
     const fresh = pages.every((p) => !p.xml);
     // Systems you've just fixed are read as they are.
     if (!rereading && !scanSettings.systemsChecked) await checkSystems(stopped);
-    // Pages whose systems were changed while or after they were read go round
-    // again: after the last page, back to the first.
-    for (let i = 0; i < pages.length; i = pages.some((p) => p.redo) && i === pages.length - 1 ? 0 : i + 1) {
-      if (pages[i].redo) pages[i].xml = pages[i].redo = undefined;
+    for (let i = 0; i < pages.length; i++) {
       if (pages[i].xml) continue;
       pageLabel = `Page ${i + 1} of ${pages.length}`;
       setPageStatus("finding staves…");
       try {
         const classes = pages[i].classes;
         pages[i].classes = null;
-        readingPage = pages[i];
         pages[i].xml = await Promise.race([recognisePage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i], classes), stopped]);
       } catch (e) {
         // A cover or words-only page: leave it out and read the rest (unless
@@ -1065,7 +1058,6 @@ async function readScan() {
   } finally {
     reading = false;
     stopReading = null;
-    readingPage = null;
     $("systems-check").hidden = true;
     $("read-hint").hidden = true;
     $("recognise").textContent = "Read music";
@@ -1770,7 +1762,8 @@ function partsDoubtful() {
 function renderPartChoice() {
   const marked = Object.keys(current.manual).length;
   const doubt = partsDoubtful() && !showAllParts;
-  const canFix = !!current.images?.length;
+  // Systems you checked before reading aren't sent back to be checked again.
+  const canFix = !!current.images?.length && !current.systemsChecked;
   $("parts-doubt").hidden = !doubt;
   $("parts-list").hidden = doubt;
   $("parts-show").hidden = !doubt;
@@ -1778,9 +1771,11 @@ function renderPartChoice() {
   $("doubt-fix-step").hidden = !canFix;
   $("doubt-intro").textContent = canFix
     ? "Its layout changes from page to page. Two steps get you your part exactly:"
-    : "Mark the staff you sing on the music instead:";
+    : current.images?.length
+      ? "Its layout changes from page to page. Mark the staff you sing on the music:"
+      : "Mark the staff you sing on the music instead:";
   $("doubt-mark-title").textContent = canFix ? "2. Mark your part" : "Mark your part";
-  $("fix-link").hidden = !canFix || (doubt && marked === 0);
+  $("fix-link").hidden = !current.images?.length || (doubt && marked === 0 && canFix);
   $("auto-part").hidden = marked > 0;
   $("marked-part").hidden = marked === 0;
   $("marked-count").textContent = `${marked} of ${score.systems.length} systems`;
