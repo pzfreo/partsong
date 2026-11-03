@@ -393,6 +393,11 @@ details { margin-top: 24px; }
 .photo-list { display: grid; gap: 8px; }
 .photo-list .page { position: relative; }
 .photo-list .page-label { display: none; }
+/* Checking the systems before reading (scan screen). */
+.systems-check { margin-top: 12px; border-left: 4px solid #e2432d; padding-left: 12px; }
+.systems-check[hidden] { display: none; }
+.systems-check > p { margin: 0 0 8px; }
+.systems-check .check-page { margin: 8px 0 0; font-weight: 700; }
 body.fixing .photo-list .page-label { display: block; margin: 0; font-weight: 700; color: var(--text); }
 body.fixing .photo-list .page + .page-label { margin-top: 8px; padding-top: 12px; border-top: 6px solid #e2432d; }
 .photo-list img { width: 100%; display: block; border-radius: 8px; border: 1px solid var(--border); }

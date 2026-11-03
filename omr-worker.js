@@ -18,7 +18,7 @@ const GPU_MODELS = new Set([MODELS[0], MODELS[1]]);
 
 let ort;
 
-const post = (msg) => self.postMessage(msg);
+const post = (msg, transfer) => self.postMessage(msg, transfer);
 const sessions = [];
 const sessionNames = []; // id -> model name
 const onGpu = new Set(); // ids of sessions created on WebGPU
@@ -426,7 +426,12 @@ async function pixels(bytes) {
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
-async function recognise(imageBytes, systemsJson) {
+// Deflated (a page's class maps are mostly background: a few MB to tens of KB).
+const squeeze = async (bytes, fmt, Stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new Stream(fmt))).arrayBuffer());
+
+// A fresh reader instance with the page open and its staffs found. classes:
+// the page's segmentation from an earlier layout (deflated), else segnet runs.
+async function openPage(imageBytes, systemsJson, packed) {
   // A fresh instance per page: its memory is returned afterwards (WebAssembly
   // memory never shrinks), and a failure can't leave state behind.
   const { exports: rs } = await WebAssembly.instantiate(wasmModule, {});
@@ -445,8 +450,18 @@ async function recognise(imageBytes, systemsJson) {
   const tiles = rs.page_open(rgba, img.width, img.height, sys, ranges.length / 2);
   rs.dealloc(rgba, img.data.byteLength);
 
-  // Segmentation, a batch of tiles at a time; each tile's class map is the
-  // argmax over the classes (first on a tie, as numpy).
+  let classes = packed ? await squeeze(packed, "deflate", DecompressionStream) : null;
+  if (classes?.length !== tiles * WIN * WIN) classes = await segment(rs, tiles);
+  const cp = copyIn(classes);
+  if (rs.page_segment(cp) !== 0) throw new Error(message());
+  rs.dealloc(cp, classes.byteLength);
+  return { rs, mem, copyIn, message, classes };
+}
+
+// Segmentation, a batch of tiles at a time; each tile's class map is the
+// argmax over the classes (first on a tie, as numpy).
+async function segment(rs, tiles) {
+  const mem = () => rs.memory.buffer;
   const segnet = await session(MODELS[0]);
   const classes = new Uint8Array(tiles * WIN * WIN);
   const tileSize = 3 * WIN * WIN;
@@ -474,9 +489,19 @@ async function recognise(imageBytes, systemsJson) {
       }
     }
   }
-  const cp = copyIn(classes);
-  if (rs.page_segment(cp) !== 0) throw new Error(message());
-  rs.dealloc(cp, classes.byteLength);
+  return classes;
+}
+
+// The page's systems before reading any staff (see page_layout), and its
+// segmentation to read it with later.
+async function layout(imageBytes, systemsJson) {
+  const { rs, message, classes } = await openPage(imageBytes, systemsJson);
+  rs.page_layout();
+  return { ...JSON.parse(message()), classes: await squeeze(classes, "deflate", CompressionStream) };
+}
+
+async function recognise(imageBytes, systemsJson, packed) {
+  const { rs, mem, copyIn, message } = await openPage(imageBytes, systemsJson, packed);
 
   const decoder = await rustDecoder();
   const encoder = exactEncoder ? null : await session(MODELS[1]);
@@ -544,12 +569,17 @@ self.onmessage = async ({ data }) => {
         (e) => post({ type: "tuned", threads: null, error: String(e && e.message ? e.message : e) }),
       );
       await tuning;
+    } else if (data.type === "layout") {
+      await ready;
+      await tuning;
+      const r = await layout(data.image, data.systems ?? "");
+      post({ type: "result", id: data.id, ...r }, [r.classes.buffer]);
     } else if (data.type === "recognise") {
       await ready;
       await tuning;
       const t0 = performance.now();
       runTimes = [];
-      const xml = await recognise(data.image, data.systems ?? "");
+      const xml = await recognise(data.image, data.systems ?? "", data.classes);
       const ms = Math.round(performance.now() - t0);
       const names = [...sessionIds.keys()];
       const parts = names.map((n) => `${n.split("_")[0]} ${Math.round(runTimes[sessionIds.get(n)]?.ms ?? 0)} ms/${runTimes[sessionIds.get(n)]?.calls ?? 0} calls`);

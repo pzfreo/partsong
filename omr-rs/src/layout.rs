@@ -226,6 +226,65 @@ fn parse_staffs(rows: Vec<Row>, reader: &mut dyn Reader) -> Result<Vec<Vec<Symbo
     Ok(voices)
 }
 
+/// The page's systems as parse_staffs_by_layout groups them, before any staff
+/// is read (so without _split_false_grand_staffs, which reads grand staffs:
+/// a grand staff counts as one, as when it's real). For checking the systems
+/// before reading the whole score.
+/// Also the parts it would give the page, in order: whether each is a grand staff.
+pub fn layout_systems(rows: Vec<Row>, user_ranges: &[(f64, f64)], reader: &dyn Reader) -> (Vec<Row>, Vec<bool>) {
+    let (rows, runs) = if !user_ranges.is_empty() {
+        let rows = user_systems(rows, user_ranges, reader);
+        let runs = runs_of_alike_rows(rows.clone());
+        (rows, runs)
+    } else {
+        let rows = join_split_rows(rows);
+        let runs = layout_runs(rows.clone());
+        (rows, runs)
+    };
+    if runs.len() == 1 && user_ranges.is_empty() {
+        let rows = ensure_same_number_of_staffs(rows);
+        let parts = kinds(&rows[0]);
+        return (rows, parts);
+    }
+    let order = part_order(&runs);
+    (runs.into_iter().flatten().collect(), order.into_iter().map(|k| k.0).collect())
+}
+
+/// The parts runs of systems give, in order (as parse_staffs_by_layout keys them).
+fn part_order(runs: &[Vec<Row>]) -> Vec<(bool, usize)> {
+    let mut order: Vec<(bool, usize)> = Vec::new();
+    for run in runs {
+        let keys = run_keys(&run[0]);
+        for (n, key) in keys.iter().enumerate() {
+            if !order.contains(key) {
+                let later = keys[n + 1..].iter().filter_map(|k| order.iter().position(|o| o == k)).min();
+                order.insert(later.unwrap_or(order.len()), *key);
+            }
+        }
+    }
+    order
+}
+
+/// A system's staves as parts: (grand, which of that kind).
+fn run_keys(row: &Row) -> Vec<(bool, usize)> {
+    let mut seen: Vec<(bool, usize)> = Vec::new();
+    let mut keys = Vec::new();
+    for &(_, kind) in &row.staffs {
+        let k = match seen.iter_mut().find(|s| s.0 == kind) {
+            Some(s) => {
+                s.1 += 1;
+                s.1
+            }
+            None => {
+                seen.push((kind, 0));
+                0
+            }
+        };
+        keys.push((kind, k));
+    }
+    keys
+}
+
 /// _parse_staffs_by_layout: read runs of alike systems, giving a part that's
 /// missing from a run empty bars there.
 pub fn parse_staffs_by_layout(rows: Vec<Row>, user_ranges: &[(f64, f64)], reader: &mut dyn Reader) -> Result<Vec<Vec<Symbol>>, Stop> {
@@ -248,21 +307,7 @@ pub fn parse_staffs_by_layout(rows: Vec<Row>, user_ranges: &[(f64, f64)], reader
     let mut order: Vec<(bool, usize)> = Vec::new();
     let mut rows_read: Vec<usize> = Vec::new();
     for run in &runs {
-        let mut seen: Vec<(bool, usize)> = Vec::new();
-        let mut keys = Vec::new();
-        for &(_, kind) in &run[0].staffs {
-            let k = match seen.iter_mut().find(|s| s.0 == kind) {
-                Some(s) => {
-                    s.1 += 1;
-                    s.1
-                }
-                None => {
-                    seen.push((kind, 0));
-                    0
-                }
-            };
-            keys.push((kind, k));
-        }
+        let keys = run_keys(&run[0]);
         for (n, key) in keys.iter().enumerate() {
             if !order.contains(key) {
                 let later = keys[n + 1..].iter().filter_map(|k| order.iter().position(|o| o == k)).min();

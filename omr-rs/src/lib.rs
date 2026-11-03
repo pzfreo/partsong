@@ -5,6 +5,7 @@
 //!   page_open(rgba, w, h, systems)  -> number of segnet tiles
 //!   tile(i)                         -> segnet input for tile i (3x320x320 f32)
 //!   page_segment(classes)           -> staffs found (argmax of segnet per tile)
+//!   page_layout()                   -> its systems, before reading (JSON in msg)
 //!   page_step()                     -> 1: a staff to read (staff_input), 0: done (MusicXML in msg)
 //!   staff_result(tokens, attention) -> what the transformer read on that staff
 //!
@@ -22,7 +23,7 @@ use homr_rs::staff::Staff;
 use homr_rs::staff_image::{prepare_staff, to_model_input, Regions, StaffMapping};
 use homr_rs::tokens::{is_lower, Symbol, Vocab};
 use homr_rs::warp::Gray;
-use layout::{drop_false_key_changes, parse_staffs_by_layout, Reader, Stop};
+use layout::{drop_false_key_changes, layout_systems, parse_staffs_by_layout, Reader, Stop};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -150,6 +151,35 @@ impl Page {
         }
     }
 
+    /// As JSON: the systems top to bottom, per system its staves (a grand
+    /// staff as its two halves), each [x0, y0, x1, y1] on the input image;
+    /// and the parts they give, as each part's staves (1, or 2 for a grand staff).
+    pub fn layout(&self) -> String {
+        let rows: Vec<Row> = self.multi.iter().map(|m| Row { staffs: m.staffs.iter().cloned().zip(m.grand.iter().copied()).collect() }).collect();
+        let (systems, parts) = layout_systems(rows, &self.user_ranges, self);
+        let bx = |st: &Staff| {
+            let (x0, y0) = self.to_input((st.min_x, st.min_y));
+            let (x1, y1) = self.to_input((st.max_x, st.max_y));
+            format!("[{},{},{},{}]", x0.round(), y0.round(), x1.round(), y1.round())
+        };
+        let sys: Vec<String> = systems
+            .iter()
+            .map(|r| {
+                let staves: Vec<String> = r
+                    .staffs
+                    .iter()
+                    .flat_map(|(st, _)| match st.halves.as_deref() {
+                        Some((a, b)) => vec![bx(a), bx(b)],
+                        None => vec![bx(st)],
+                    })
+                    .collect();
+                format!("[{}]", staves.join(","))
+            })
+            .collect();
+        let parts: Vec<&str> = parts.iter().map(|&g| if g { "2" } else { "1" }).collect();
+        format!("{{\"systems\":[{}],\"parts\":[{}]}}", sys.join(","), parts.join(","))
+    }
+
     pub fn input(&self) -> (&[f32], (usize, usize)) {
         (&self.input, self.input_dims)
     }
@@ -265,6 +295,15 @@ pub unsafe extern "C" fn page_segment(classes: *const u8) -> i32 {
             }
         }
     })
+}
+
+/// After page_segment: the page's systems (Page::layout) in msg.
+#[no_mangle]
+pub extern "C" fn page_layout() -> usize {
+    let json = PAGE.with(|p| p.borrow().as_ref().unwrap().layout());
+    let n = json.len();
+    set_msg(json);
+    n
 }
 
 #[no_mangle]
