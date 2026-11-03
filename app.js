@@ -548,6 +548,7 @@ function resetWorker() {
 // thread counts (tune). Afterwards the reader is closed unless a scan is using it.
 const READER_FETCHED = "partsong-reader-fetched";
 function prefetchReader() {
+  if (noReader) return;
   let fetched = false;
   try {
     fetched = !!localStorage.getItem(READER_FETCHED);
@@ -607,6 +608,29 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
 }
 
 $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
+
+// Released builds don't read music on iPhone/iPad yet: Safari there runs out
+// of memory reading (tests continue on the test site, whose builds are
+// stamped NNN_test). Say so before they photograph a whole score.
+// (iPadOS asks for desktop sites, so it looks like a Mac with a touch screen.)
+const ua = navigator.userAgent;
+const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const noReader = iDevice && !/_test$|^dev$/.test(VERSION);
+let noReaderText = "";
+if (noReader) {
+  const device = /iPhone|iPod/.test(ua) ? "iPhone" : "iPad";
+  $("open-xml").previousSibling.textContent = "Open shared score";
+  noReaderText =
+    `This PDF is sheet music to scan, which doesn't work on ${device} yet. ` +
+    "Here you can only open scores shared from Partsong (their files end in .partsong.pdf).";
+  const text =
+    `Scanning doesn't work on ${device} yet, so here you can only open scores shared from Partsong. ` +
+    `Scan on an Android phone or a computer using Chrome or Edge, then share the score to your ${device} to play it.`;
+  for (const p of document.querySelectorAll(".no-reader")) Object.assign(p, { textContent: text, hidden: false });
+  // Hides everything that would start a read (styles.css): Scan music, the
+  // sample, Read again, Check and fix systems.
+  document.body.classList.add("no-reader-device");
+}
 
 // The sample score (samples/tallis-if-ye-love-me.pdf, from CPDL):
 // opens the scan screen with its pages added, ready for Read music.
@@ -968,7 +992,8 @@ async function openFiles(files) {
       name ||= f.name.replace(/\.(musicxml|xml)$/i, "");
     }
     // An ordinary PDF is sheet music to read: start at once.
-    if (pdfs.length) {
+    if (pdfs.length && noReader) showNotice(noReaderText);
+    else if (pdfs.length) {
       loadScan();
       if ((await addFiles(pdfs)) && pages.length) readScan();
     }
