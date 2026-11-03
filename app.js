@@ -1054,7 +1054,7 @@ let prepared = null; // { id, file, link, title }
 function liveEntry(entry) {
   if (!entry || entry.id !== current?.id) return entry;
   const live = { ...entry, tempo: Number($("tempo").value), others: Number($("others").value) };
-  for (const k of ["title", "mine", "excluded", "manual", "markedStaff", "octave", "locked", "repeats", "playRepeats"]) if (current[k] !== undefined) live[k] = current[k];
+  for (const k of ["title", "mine", "excluded", "manual", "markedStaff", "octave", "locked", "repeats", "playRepeats", "layout"]) if (current[k] !== undefined) live[k] = current[k];
   return live;
 }
 
@@ -1347,10 +1347,59 @@ let playTracked = false; // count the first play of each opened score only
 let current; // library entry
 let score;
 
+// How bars are lined up across parts. Marks and repeat starts are saved by
+// system and bar number, so a score saved under an earlier layout has them
+// moved to the system or bar in the same place on its page (layout 2: bars
+// lined up system by system, which can drop a misread extra bar or system).
+const LAYOUT = 2;
+function migrateLayout(entry) {
+  if ((entry.layout ?? 1) >= LAYOUT) return;
+  entry.layout = LAYOUT;
+  const refs = [entry.manual, entry.markedStaff, entry.repeats].some((o) => o && Object.keys(o).length);
+  if (refs) {
+    const old = buildScore(entry.pages.map(parsePage), { legacyAlign: true });
+    const sys = placeMap(old.systems, score.systems);
+    const bar = placeMap(old.measures, score.measures);
+    const move = (o, key, value = (v) => v) => {
+      if (!o) return o;
+      // Larger old systems last, so a misread one-bar system doesn't win.
+      const keys = Object.keys(o).sort((a, b) => (old.systems[a]?.bars.length ?? 0) - (old.systems[b]?.bars.length ?? 0));
+      return Object.fromEntries(keys.map((k) => [key(k), value(o[k])]).filter(([k]) => k != null));
+    };
+    entry.manual = move(entry.manual, (k) => sys.get(Number(k)));
+    entry.markedStaff = move(entry.markedStaff, (k) => sys.get(Number(k)));
+    // repeats: bar number (1-based) -> bar it goes back to (1-based)
+    const barNo = (n) => { const i = bar.get(Number(n) - 1); return i == null ? null : i + 1; };
+    entry.repeats = entry.repeats && Object.fromEntries(Object.entries(entry.repeats).map(([k, v]) => [barNo(k), barNo(v) ?? v]).filter(([k]) => k != null));
+  }
+  updateEntry(entry.id, { layout: entry.layout, manual: entry.manual, markedStaff: entry.markedStaff, repeats: entry.repeats });
+}
+
+// Index in `to` of the item (system or bar, with page and box) in the same
+// place as each item of `from`: same page, most vertical overlap, then
+// nearest left edge. Without boxes, the same index.
+function placeMap(from, to) {
+  const map = new Map();
+  from.forEach((a, i) => {
+    if (!a.box) return to[i] && map.set(i, i);
+    let best = null;
+    let bestScore = -Infinity;
+    to.forEach((b, j) => {
+      if (!b.box || b.page !== a.page) return;
+      const overlap = Math.min(a.box.y1, b.box.y1) - Math.max(a.box.y0, b.box.y0);
+      const score = overlap - Math.abs(a.box.x0 - b.box.x0) * 1e-3;
+      if (overlap > 0 && score > bestScore) (best = j), (bestScore = score);
+    });
+    if (best != null) map.set(i, best);
+  });
+  return map;
+}
+
 function openScore(entry, nav = "push") {
   const partChosen = entry.mine != null || Object.keys(entry.manual ?? {}).length > 0; // before defaults below
   current = entry;
   score = buildScore(entry.pages.map(parsePage));
+  migrateLayout(entry);
   player?.stop();
   player = new Player(score);
   playTracked = false;

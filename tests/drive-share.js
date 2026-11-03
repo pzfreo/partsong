@@ -51,7 +51,7 @@ const open = (file) => { const dt = new DataTransfer(); dt.items.add(file); $("o
 open(shared);
 await waitFor(() => !$("practice").hidden, 20000, "opened");
 const got = (await idb("readonly", (s) => s.getAll())).find((e) => e.id === "hur-1");
-const dims = await Promise.all(got.images.map(async (b) => { const i = await createImageBitmap(b); return `${i.width}x${i.height}`; }));
+const dims = await Promise.all(got.images.map(async (b) => { const i = await createImageBitmap(b instanceof Blob ? b : new Blob([b.bytes], { type: b.type })); return `${i.width}x${i.height}`; }));
 r.restored = { title: got.title, pages: got.pages.length, images: dims, manual: got.manual, octave: got.octave, tempo: got.tempo, others: got.others, locked: got.locked };
 await waitFor(() => document.querySelectorAll(".photo-list .mark").length, 10000, "mark shaded");
 r.markShaded = document.querySelectorAll(".photo-list .mark").length;

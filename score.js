@@ -303,10 +303,35 @@ const barX0 = (m) => {
 };
 
 // homr sometimes splits one bar in two for a single part, shifting that part
-// against the others for the rest of the page. When parts on a page disagree
-// on bar count, a bar is merged into the previous one if it starts on the
-// same row but clearly before the reference part's next bar.
-function alignBars(page) {
+// against the others for the rest of the page. When parts disagree on bar
+// count, a bar is merged into the previous one if it starts on the same row
+// but clearly before the reference part's next bar. This is done system by
+// system when every part marks the same number of systems on the page: a
+// whole-page count can pick the wrong reference (Of A Rose p. 11: one part's
+// extra bar in system 1 was copied into the empty bars of two parts that only
+// sing in system 2, so 9 bars outvoted the true 8, and every bar from 80 on
+// was shifted for the parts that were right).
+function alignBars(page, legacy) {
+  const counts = page.parts.map((p) => p.measures.length);
+  if (new Set(counts).size < 2) return;
+  const systemsOf = (ms) => {
+    const out = [];
+    ms.forEach((m, i) => (i === 0 || m.newSystem ? out.push([m]) : out.at(-1).push(m)));
+    return out;
+  };
+  const split = page.parts.map((p) => systemsOf(p.measures));
+  const n = split[0].length;
+  if (legacy || n < 2 || !split.every((s) => s.length === n)) return alignBarsWholePage(page);
+  const tol = barTolerance(page.parts.map((p) => p.measures));
+  const aligned = page.parts.map(() => []);
+  for (let k = 0; k < n; k++) alignSegment(split.map((s) => s[k]), tol).forEach((seg, j) => aligned[j].push(...seg));
+  page.parts.forEach((p, j) => (p.measures = aligned[j]));
+}
+
+// Before systems were lined up one by one (scores saved then keep their marks
+// by system and bar number: see buildScore's legacyAlign), and still where
+// parts don't mark the same systems.
+function alignBarsWholePage(page) {
   const counts = page.parts.map((p) => p.measures.length);
   if (new Set(counts).size < 2) return;
   const mode = counts.sort((a, b) => counts.filter((c) => c === b).length - counts.filter((c) => c === a).length)[0];
@@ -340,6 +365,53 @@ function alignBars(page) {
     }
     part.measures = out;
   }
+}
+
+// 3% of the width the page's notes span.
+function barTolerance(partsBars) {
+  const xs = partsBars.flatMap((ms) => ms.flatMap((m) => m.notes.filter((n) => n.pos).map((n) => n.pos.x)));
+  return xs.length ? (Math.max(...xs) - Math.min(...xs)) * 0.03 : 0;
+}
+
+// Bars of each part (same stretch of music), with extra bars removed: empty
+// bars first, then bars merged into the previous one. The reference count is
+// the commonest among parts with notes here (all parts, if none have).
+// The bars are one system, so a bar past the reference's last one that
+// starts after the previous bar is the end of that bar.
+function alignSegment(partsBars, tol) {
+  const withNotes = partsBars.filter((ms) => ms.some((m) => m.notes.length));
+  const pool = (withNotes.length ? withNotes : partsBars).map((ms) => ms.length);
+  if (new Set(partsBars.map((ms) => ms.length)).size < 2) return partsBars;
+  const mode = [...pool].sort((a, b) => pool.filter((c) => c === b).length - pool.filter((c) => c === a).length)[0];
+  const ref = (withNotes.length ? withNotes : partsBars).find((ms) => ms.length === mode).map(barX0);
+  return partsBars.map((ms0) => {
+    let extra = ms0.length - mode;
+    if (extra <= 0) return ms0;
+    // Empty bars (no notes or rests at all, e.g. around a repeat's endings)
+    // are reading artefacts: drop those first.
+    const ms = ms0.filter((m, i) => {
+      if (m.notes.length || extra <= 0) return true;
+      extra--;
+      const after = ms0.slice(i + 1).find((x) => x.notes.length) ?? ms0[i + 1];
+      carryMarks(m, ms0.slice(0, i).findLast((x) => x.notes.length), after);
+      if (m.newSystem && after) after.newSystem = true;
+      return false;
+    });
+    const out = [];
+    for (const m of ms) {
+      const prev = out.at(-1);
+      const x0 = barX0(m);
+      const nextRef = ref[out.length];
+      const px0 = prev && barX0(prev);
+      if (extra > 0 && prev && x0 != null && px0 != null && x0 > px0 && (nextRef == null || x0 < nextRef - tol)) {
+        extra--;
+        prev.notes.push(...m.notes.map((n) => ({ ...n, start: n.start + prev.length })));
+        prev.length += m.length;
+        carryMarks(m, prev, null);
+      } else out.push({ ...m, notes: [...m.notes] });
+    }
+    return out;
+  });
 }
 
 // Which bars belong to a 1st/2nd-time ending (bar.ending = [1] etc.), and where
@@ -391,9 +463,10 @@ export function playOrder(measures, from, to, targets = {}) {
   return order;
 }
 
-// pages: array of parsePage() results, in page order.
-export function buildScore(pages) {
-  pages.forEach(alignBars);
+// pages: array of parsePage() results, in page order. legacyAlign: bars lined
+// up across parts page by page, as before layout 2 (LAYOUT in app.js).
+export function buildScore(pages, { legacyAlign = false } = {}) {
+  pages.forEach((page) => alignBars(page, legacyAlign));
   pages.forEach(foldSplitChoir);
   // Match parts across pages by staff layout: the k-th 2-staff part on each
   // page is the same part, etc. Pages may lack a part (e.g. a solo line).

@@ -7,7 +7,7 @@
 // app's original name, Part Scanner, so older files still open.)
 
 const FORMAT = "partscanner-score";
-const SETTINGS = ["mine", "excluded", "manual", "octave", "tempo", "others", "locked", "repeats", "playRepeats"];
+const SETTINGS = ["mine", "excluded", "manual", "markedStaff", "octave", "tempo", "others", "locked", "repeats", "playRepeats", "layout"];
 const PHOTO_QUALITY = 0.85;
 const PAGE_WIDTH = 595.28; // A4 width in PDF points; photo pages keep their shape
 
