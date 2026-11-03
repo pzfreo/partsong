@@ -400,7 +400,11 @@ const EOS_TOKEN = 2;
 const MAX_SEQ_LEN = 608;
 const DECODER_DIM = 512;
 const CONTEXT_POSITIONS = 1280;
-const SEGNET_BATCH = 8; // homr's batch size (kept: the GPU's results can depend on it)
+// homr's batch size, kept on the GPU, where results can depend on it. On the
+// CPU each tile's result is the same whatever the batch, and one tile at a
+// time halves onnxruntime's memory (Safari: 338 MB to 161 MB), which iPhones
+// are short of.
+const SEGNET_BATCH = 8;
 const WIN = 320;
 
 let wasmModule;
@@ -435,13 +439,14 @@ async function recognise(imageBytes, systemsJson) {
   const tiles = rs.page_open(rgba, img.width, img.height, sys, ranges.length / 2);
   rs.dealloc(rgba, img.data.byteLength);
 
-  // Segmentation, SEGNET_BATCH tiles at a time; each tile's class map is the
+  // Segmentation, a batch of tiles at a time; each tile's class map is the
   // argmax over the classes (first on a tie, as numpy).
   const segnet = await session(MODELS[0]);
   const classes = new Uint8Array(tiles * WIN * WIN);
   const tileSize = 3 * WIN * WIN;
-  for (let b = 0; b < tiles; b += SEGNET_BATCH) {
-    const n = Math.min(SEGNET_BATCH, tiles - b);
+  const batch = onGpu.has(segnet) ? SEGNET_BATCH : 1;
+  for (let b = 0; b < tiles; b += batch) {
+    const n = Math.min(batch, tiles - b);
     const input = new Float32Array(n * tileSize);
     for (let k = 0; k < n; k++) input.set(new Float32Array(mem(), rs.tile(b + k), tileSize), k * tileSize);
     const s = sessions[segnet];
