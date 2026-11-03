@@ -813,6 +813,16 @@ async function normalise(blob) {
   return (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer();
 }
 
+// A saved page whose picture the phone has lost can't be read again: say
+// what to do rather than show the browser's error.
+async function pagePixels(blob) {
+  try {
+    return await normalise(blob);
+  } catch {
+    throw new Error("the phone has lost the picture of this page. Tap Discard this scan, then add the pages or PDF again");
+  }
+}
+
 let requestId = 0;
 // systems: the user's systems for this page ([top, bottom] ranges), if fixed.
 function recognisePage(image, systems) {
@@ -860,7 +870,7 @@ async function readScan() {
       pageLabel = `Page ${i + 1} of ${pages.length}`;
       setPageStatus("finding staves…");
       try {
-        pages[i].xml = await Promise.race([recognisePage(await normalise(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
+        pages[i].xml = await Promise.race([recognisePage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
       } catch (e) {
         // A cover or words-only page: leave it out and read the rest (unless
         // it's the only page left, when the error is the answer).

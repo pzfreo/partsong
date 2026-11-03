@@ -1,5 +1,10 @@
 // Score library in IndexedDB: recognised MusicXML pages, the original photos
-// (as Blobs) and practice settings, one record per score.
+// and practice settings, one record per score.
+//
+// Photos are stored as bytes, not Blobs: Safari on iPhones keeps a stored
+// Blob in a separate file it can lose, and then hands back a Blob that can't
+// be read ("An error occurred reading the Blob argument"). Callers still put
+// and get Blobs; older records that hold Blobs read as before.
 
 const DB_NAME = "partscanner";
 const STORE = "scores";
@@ -42,20 +47,35 @@ async function migrateLegacy(db) {
   return db;
 }
 
+async function toStored(entry) {
+  if (!entry.images?.some((b) => b instanceof Blob)) return entry;
+  const images = await Promise.all(
+    entry.images.map(async (b) => (b instanceof Blob ? { type: b.type, bytes: await b.arrayBuffer() } : b)),
+  );
+  return { ...entry, images };
+}
+
+function fromStored(entry) {
+  if (!entry.images?.length) return entry;
+  return { ...entry, images: entry.images.map((b) => (b?.bytes ? new Blob([b.bytes], { type: b.type }) : b)) };
+}
+
 export async function all() {
-  return run(await open(), "readonly", (store) => store.getAll());
+  return (await run(await open(), "readonly", (store) => store.getAll())).map(fromStored);
 }
 
 export async function put(entry) {
   navigator.storage?.persist?.();
-  return run(await open(), "readwrite", (store) => store.put(entry));
+  const stored = await toStored(entry);
+  return run(await open(), "readwrite", (store) => store.put(stored));
 }
 
 export async function update(id, changes) {
+  const stored = await toStored(changes);
   const db = await open();
   return run(db, "readwrite", (store) => {
     const req = store.get(id);
-    req.onsuccess = () => req.result && store.put({ ...req.result, ...changes });
+    req.onsuccess = () => req.result && store.put({ ...req.result, ...stored });
     return {};
   });
 }

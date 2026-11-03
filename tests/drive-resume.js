@@ -30,7 +30,7 @@ r.wakeLockRequested = wakeCalls;
 a.f.remove(); // the tab is killed mid-read
 await sleep(500);
 const mid = (await scans()).find((e) => e.title === "Interrupted");
-r.savedMidway = { pending: mid?.pending, done: mid?.pages.filter(Boolean).length, of: mid?.pages.length, images: mid?.images.length };
+r.savedMidway = { pending: mid?.pending, done: mid?.pages.filter(Boolean).length, of: mid?.pages.length, images: mid?.images.length, storedAsBytes: !!mid?.images.every((b) => b.bytes instanceof ArrayBuffer && !(b instanceof Blob)) };
 
 let b = await app(); // reopening the app
 const seen = [];
