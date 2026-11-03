@@ -955,10 +955,7 @@ function askToCheck(shown, doubtful) {
   );
   const which = doubtful.map((i) => i + 1);
   const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
-  $("check-intro").textContent =
-    "Check the systems before Partsong reads the music. Red lines are where it thinks one system ends and the next begins. " +
-    "If one is wrong, tap between the two staves to add or remove a line." +
-    (which.length ? ` ${named} unusual.` : "");
+  $("check-intro").textContent = "Red lines mark systems. Tap between staves to change." + (which.length ? ` ${named} unusual.` : "");
   $("systems-check").hidden = false;
   $("systems-check").scrollIntoView({ behavior: "smooth", block: "start" });
   return new Promise((resolve) => {
