@@ -106,9 +106,15 @@ async function modelBytes(name) {
 }
 
 
+// On iPhones and iPads, segnet runs on the CPU: on WebGPU, onnxruntime makes
+// about 900 MB of short-lived buffers a page that Safari frees late (Mac
+// Safari, 3 pages: 4.3 GB at the peak, against 1.5 GB with segnet on the CPU),
+// more than iOS lets a tab have.
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+
 async function newSession(id) {
   const name = sessionNames[id];
-  const gpu = useGpu && GPU_MODELS.has(name);
+  const gpu = useGpu && GPU_MODELS.has(name) && !(IOS && name === MODELS[0]);
   const eps = gpu ? ["webgpu", "wasm"] : ["wasm"];
   const t0 = performance.now();
   const session = await ort.InferenceSession.create(await modelBytes(name), {
