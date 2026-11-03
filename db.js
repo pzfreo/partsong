@@ -4,7 +4,8 @@
 // Photos are stored as bytes, not Blobs: Safari on iPhones keeps a stored
 // Blob in a separate file it can lose, and then hands back a Blob that can't
 // be read ("An error occurred reading the Blob argument"). Callers still put
-// and get Blobs; older records that hold Blobs read as before.
+// and get Blobs; older records that hold Blobs read as before (test for a
+// Blob first: Blobs have a bytes() method too).
 
 const DB_NAME = "partscanner";
 const STORE = "scores";
@@ -57,7 +58,7 @@ async function toStored(entry) {
 
 function fromStored(entry) {
   if (!entry.images?.length) return entry;
-  return { ...entry, images: entry.images.map((b) => (b?.bytes ? new Blob([b.bytes], { type: b.type }) : b)) };
+  return { ...entry, images: entry.images.map((b) => (b instanceof Blob || !b?.bytes ? b : new Blob([b.bytes], { type: b.type }))) };
 }
 
 export async function all() {
