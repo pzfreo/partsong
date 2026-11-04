@@ -26,8 +26,9 @@ $("open-xml").files = dt.files; $("open-xml").dispatchEvent(new Event("change"))
 await waitFor(() => !$("systems-check").hidden, 900000, "systems check");
 // It opens as soon as page 1's systems are found, the rest following, and
 // Read music waits for the last.
-const r = { firstShown: document.querySelectorAll("#check-list .check-page").length, lockedWhileFinding: $("check-done").disabled, waitText: $("check-wait").textContent };
-await waitFor(() => !$("check-done").disabled, 900000, "all systems found");
+const r = { firstShown: document.querySelectorAll("#check-list .check-page").length, lockedWhileFinding: $("check-done").hidden && !$("check-stop").hidden && $("recognise").hidden, waitText: $("check-wait").textContent };
+await waitFor(() => !$("check-done").hidden, 900000, "all systems found");
+r.stopGone = $("check-stop").hidden;
 r.doneText = $("check-wait").textContent;
 r.staffsReadBeforeCheck = staffReads;
 r.intro = $("check-intro").textContent;
@@ -54,11 +55,11 @@ const s = sc.buildScore(entry.pages.map(sc.parsePage));
 r.page1 = s.systems.filter((x) => x.page === 0).map((x) => x.staves.length).join(",");
 r.pagesRead = pagesRead;
 r.hints = entry.systemHints && Object.keys(entry.systemHints).join(",");
-r.checkHidden = $("systems-check").hidden;
+r.checkHidden = $("systems-check").hidden && !$("recognise").hidden;
 r.checkedKept = entry.systemsChecked === true;
 // The parts are still muddled (tree's layout changes), but the panel doesn't
 // send you back to check the systems you've just OK'd.
 r.doubtShown = !$("parts-doubt").hidden;
 r.fixStepHidden = $("doubt-fix-step").hidden;
-r.ok = r.firstShown === 1 && r.lockedWhileFinding && /^Finding systems: page 2 of 6/.test(r.waitText) && /^All found\. Step 2 reads the notes/.test(r.doneText) && r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.doubtShown && r.fixStepHidden;
+r.ok = r.firstShown === 1 && r.lockedWhileFinding && /^Finding systems: page 2 of 6/.test(r.waitText) && r.doneText === "Systems look OK? Next:" && r.stopGone && r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.doubtShown && r.fixStepHidden;
 window.result = r;

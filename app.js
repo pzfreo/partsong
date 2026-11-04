@@ -895,6 +895,8 @@ function layoutPage(image, systems) {
 function ask(msg, transfer) {
   const id = ++requestId;
   return new Promise((resolve, reject) => {
+    // Stopped while a photo was being prepared: the reader is already gone.
+    if (!worker) return reject(new Stopped());
     pending.set(id, { resolve, reject });
     worker.postMessage({ ...msg, id }, transfer);
   });
@@ -961,6 +963,7 @@ async function checkSystems(stopped) {
   } finally {
     pageLabel = "";
     $("systems-check").hidden = true;
+    $("recognise").hidden = false;
   }
   scanSettings.systemsChecked = true;
   if (scanId) await db.update(scanId, { systemHints: scanSettings.systemHints, systemsChecked: true }).catch(() => {});
@@ -969,6 +972,7 @@ async function checkSystems(stopped) {
 // The check screen: pages are added as their systems are found; done()
 // marks the unusual ones, lets Read music be tapped, and resolves with the
 // systems of the pages changed (page -> [top, bottom] ranges).
+$("check-stop").onclick = () => $("recognise").click();
 const CHECK_LINES = "Red lines mark systems; tap between staves to change.";
 const CHECK_INTRO = `Pages appear as their systems are found: check each while the rest are found. ${CHECK_LINES}`;
 function openCheck() {
@@ -976,8 +980,12 @@ function openCheck() {
   const labels = {};
   $("check-list").replaceChildren();
   $("check-intro").textContent = CHECK_INTRO;
-  $("check-done").disabled = true;
+  // Stop reading moves into the bar at the bottom (the one above scrolls
+  // away), and becomes Read music once every page's systems are found.
+  $("check-done").hidden = true;
   $("check-done").onclick = null;
+  $("check-stop").hidden = false;
+  $("recognise").hidden = true;
   $("check-wait").textContent = "Finding systems…";
   $("systems-check").hidden = false;
   $("systems-check").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1016,8 +1024,9 @@ function openCheck() {
       const which = doubtful.map((i) => i + 1);
       const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
       $("check-intro").textContent = CHECK_LINES + (which.length ? ` ${named} unusual.` : "");
-      $("check-wait").textContent = "All found. Step 2 reads the notes, which takes longer:";
-      $("check-done").disabled = false;
+      $("check-wait").textContent = "Systems look OK? Next:";
+      $("check-stop").hidden = true;
+      $("check-done").hidden = false;
       return new Promise((resolve) => {
         $("check-done").onclick = () => {
           const hints = {};
