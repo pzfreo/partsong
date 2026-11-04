@@ -969,7 +969,8 @@ async function checkSystems(stopped) {
 // The check screen: pages are added as their systems are found; done()
 // marks the unusual ones, lets Read music be tapped, and resolves with the
 // systems of the pages changed (page -> [top, bottom] ranges).
-const CHECK_INTRO = "Red lines mark systems. Tap between staves to change.";
+const CHECK_LINES = "Red lines mark systems; tap between staves to change.";
+const CHECK_INTRO = `Pages appear as their systems are found: check each while the rest are found. ${CHECK_LINES}`;
 function openCheck() {
   const drafts = {};
   const labels = {};
@@ -977,6 +978,7 @@ function openCheck() {
   $("check-intro").textContent = CHECK_INTRO;
   $("check-done").disabled = true;
   $("check-done").onclick = null;
+  $("check-wait").textContent = "Finding systems…";
   $("systems-check").hidden = false;
   $("systems-check").scrollIntoView({ behavior: "smooth", block: "start" });
   return {
@@ -1013,8 +1015,8 @@ function openCheck() {
       for (const i of doubtful) if (labels[i]) labels[i].textContent += ": looks unusual";
       const which = doubtful.map((i) => i + 1);
       const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
-      $("check-intro").textContent = CHECK_INTRO + (which.length ? ` ${named} unusual.` : "");
-      $("check-wait").textContent = "Once you're done:";
+      $("check-intro").textContent = CHECK_LINES + (which.length ? ` ${named} unusual.` : "");
+      $("check-wait").textContent = "All found. Step 2 reads the notes, which takes longer:";
       $("check-done").disabled = false;
       return new Promise((resolve) => {
         $("check-done").onclick = () => {

@@ -60,5 +60,5 @@ r.checkedKept = entry.systemsChecked === true;
 // send you back to check the systems you've just OK'd.
 r.doubtShown = !$("parts-doubt").hidden;
 r.fixStepHidden = $("doubt-fix-step").hidden;
-r.ok = r.firstShown === 1 && r.lockedWhileFinding && /^Finding systems: page 2 of 6/.test(r.waitText) && r.doneText === "Once you're done:" && r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.doubtShown && r.fixStepHidden;
+r.ok = r.firstShown === 1 && r.lockedWhileFinding && /^Finding systems: page 2 of 6/.test(r.waitText) && /^All found\. Step 2 reads the notes/.test(r.doneText) && r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.doubtShown && r.fixStepHidden;
 window.result = r;
