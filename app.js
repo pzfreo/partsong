@@ -671,6 +671,37 @@ function track(name, title = name) {
   } catch {}
 }
 
+// Whether people come back: once a day, on opening, how many different days
+// this device has used Partsong, how long since its first, and how many
+// scores it holds, each in broad groups. The counts stay on the device; no
+// id is sent, so nothing links one device's counts together.
+const USE_DAYS = "partsong-use-days"; // { first, last, days }
+const group = (n, edges, from = 0) => {
+  for (const [i, e] of edges.entries()) {
+    if (n < e) {
+      const lo = i ? edges[i - 1] : from;
+      return e - lo === 1 ? String(lo) : `${lo}–${e - 1}`;
+    }
+  }
+  return `${edges.at(-1)}+`;
+};
+async function countReturn() {
+  try {
+    const today = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD, local
+    const was = JSON.parse(localStorage.getItem(USE_DAYS) || "null");
+    if (was?.last === today) return;
+    const use = { first: was?.first ?? today, last: today, days: (was?.days ?? 0) + 1 };
+    localStorage.setItem(USE_DAYS, JSON.stringify(use));
+    const since = Math.round((Date.parse(today) - Date.parse(use.first)) / 864e5);
+    const scores = (await db.all().catch(() => [])).filter((e) => !e.pending).length;
+    // GoatCounter's script loads after the app starts (and not at all if blocked).
+    for (let i = 0; i < 30 && !window.goatcounter?.count; i++) await new Promise((r) => setTimeout(r, 500));
+    track(`use: day ${group(use.days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
+    track(`use: first ${since === 0 ? "today" : since < 7 ? "1–6 days ago" : since < 28 ? "1–4 weeks ago" : since < 91 ? "1–3 months ago" : "3+ months ago"}`);
+    track(`library: ${group(scores, [1, 2, 3, 4, 6, 11, 21, 51])} scores`);
+  } catch {}
+}
+
 // Why a reading failed, short enough to count: the error's last line,
 // without file paths, and with
 // numbers as N so the same failure counts together. Never the score or photo.
@@ -2648,6 +2679,7 @@ if (location.hash.startsWith("#s=")) {
   renderLibrary().then(async () => ((await (await caches.open("partscanner-inbox")).keys()).length ? openInbox() : resumeUnfinished()));
 }
 prefetchReader();
+countReturn();
 
 // PDFs opened with Partsong from the system's "Open with" (manifest
 // file_handlers: desktop Chrome/Edge, and Android where Chrome supports it):
