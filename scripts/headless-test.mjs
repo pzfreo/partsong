@@ -50,6 +50,18 @@ ws.onmessage = ({ data }) => {
       spawn("sh", ["-c", text.slice(9)]).on("exit", (code) => console.log("exec exit", code));
       return;
     }
+    // A real touch tap (through Chrome's input pipeline, unlike a synthetic
+    // click): touchTap(x, y) in the page.
+    if (text.startsWith("__TAP__ ")) {
+      const [x, y] = text.slice(8).split(" ").map(Number);
+      (async () => {
+        await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+        await sleep(60);
+        await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        send("Runtime.evaluate", { expression: "window.__tapDone?.()" });
+      })();
+      return;
+    }
     if (text === "__SHOT__" || text === "__SHOTVIEW__") {
       send("Page.captureScreenshot", { format: "png", captureBeyondViewport: text === "__SHOT__" }).then((r) => {
         const file = `${shotPrefix}-${++shots}.png`;
@@ -66,6 +78,7 @@ ws.onmessage = ({ data }) => {
 await send("Runtime.enable");
 await send("Page.enable");
 await send("Emulation.setDeviceMetricsOverride", { width: 412, height: 915, deviceScaleFactor: 2, mobile: true });
+await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
 // CPU_THROTTLE=4 slows the page down to roughly phone speed.
 if (process.env.USER_AGENT) await send("Emulation.setUserAgentOverride", { userAgent: process.env.USER_AGENT });
 if (process.env.CPU_THROTTLE) await send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.CPU_THROTTLE) });
@@ -79,7 +92,7 @@ if (driveFile) {
   send("Runtime.evaluate", {
     // Reading stops at the systems check until Read music there is tapped:
     // tap it, unless the drive checks the systems itself (window.manualCheck).
-    expression: `setInterval(() => { if (window.manualCheck) return; for (const d of [document, ...[...document.querySelectorAll("iframe")].map((f) => { try { return f.contentDocument; } catch {} })]) { const b = d?.getElementById("check-done"); if (b && !d.getElementById("systems-check").hidden) b.click(); } }, 500); window.shot = (full = true) => new Promise(r => { window.__shotDone = r; console.log(full ? "__SHOT__" : "__SHOTVIEW__"); }); (async () => { ${code} })().catch(e => { window.result = { error: String(e.stack || e) }; });`,
+    expression: `setInterval(() => { if (window.manualCheck) return; for (const d of [document, ...[...document.querySelectorAll("iframe")].map((f) => { try { return f.contentDocument; } catch {} })]) { const b = d?.getElementById("check-done"); if (b && !d.getElementById("systems-check").hidden) b.click(); } }, 500); window.touchTap = (x, y) => new Promise(r => { window.__tapDone = r; console.log("__TAP__ " + x + " " + y); }); window.shot = (full = true) => new Promise(r => { window.__shotDone = r; console.log(full ? "__SHOT__" : "__SHOTVIEW__"); }); (async () => { ${code} })().catch(e => { window.result = { error: String(e.stack || e) }; });`,
   });
 }
 

@@ -1009,9 +1009,14 @@ function openCheck() {
         drawGaps(g, d, d.w);
       };
       svg.onclick = (e) => {
-        if (!d.w) return;
+        // Taps are logged (where, and the page's gaps after: | a system's end,
+        // . inside one) so a report shows what a tap did.
+        if (!d.w) return remember(readerLog, `Check tap p${i + 1}: picture not loaded yet`, 40);
         const rect = svg.getBoundingClientRect();
-        if (toggleGap(d, ((e.clientY - rect.top) / rect.height) * d.h)) drawGaps(g, d, d.w);
+        const y = ((e.clientY - rect.top) / rect.height) * d.h;
+        if (toggleGap(d, y)) drawGaps(g, d, d.w);
+        const gaps = d.rows.slice(1).map((row, k) => `${Math.round((d.rows[k].y1 + row.y0) / 2)}${d.splits[k] ? "|" : "."}`);
+        remember(readerLog, `Check tap p${i + 1} at y ${Math.round(y)} of ${Math.round(d.h)}: ${gaps.join(" ")}`.slice(0, 200), 40);
       };
       div.append(img, svg);
       $("check-list").append(label, div);
@@ -1047,6 +1052,7 @@ class Stopped extends Error {}
 async function readScan() {
   if (reading) return;
   reading = true;
+  $("scan").classList.add("reading");
   $("recognise").textContent = "Stop reading";
   $("read-hint").hidden = false;
   const stopped = new Promise((_, reject) => {
@@ -1127,6 +1133,7 @@ async function readScan() {
     return;
   } finally {
     reading = false;
+    $("scan").classList.remove("reading");
     stopReading = null;
     $("systems-check").hidden = true;
     $("read-step").hidden = true;
