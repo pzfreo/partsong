@@ -69,11 +69,15 @@ async function downloadModel(name) {
           const got = await fetchPiece(modelUrl(name), start, end);
           if (got.whole) {
             if (got.whole.byteLength !== size) throw new Error("short read");
-            await cache.put(modelUrl(name), new Response(got.whole));
+            await cache.put(modelUrl(name), new Response(got.whole)).catch((e) => {
+              throw new Error(`couldn't store it: ${e.name || e.message}`);
+            });
             post({ type: "progress", stage: "download", name, loaded: size, total: MODELS_TOTAL_BYTES });
             return;
           }
-          await cache.put(pieceKey(name, i), new Response(got.piece));
+          await cache.put(pieceKey(name, i), new Response(got.piece)).catch((e) => {
+            throw new Error(`couldn't store it: ${e.name || e.message}`);
+          });
           break;
         } catch (e) {
           if (attempt >= 8) {
@@ -81,7 +85,7 @@ async function downloadModel(name) {
               `the connection keeps dropping (${e.message}). What has downloaded is kept; try again on a better connection`,
             );
           }
-          post({ type: "progress", stage: "retry", name, attempt });
+          post({ type: "progress", stage: "retry", name, attempt, why: e.name === "AbortError" ? "stalled" : e.message || e.name });
           await sleep(Math.min(30000, 2000 * attempt * attempt));
         }
       }

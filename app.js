@@ -26,6 +26,10 @@ const remember = (list, item, max) => {
 // (iPadOS asks for desktop sites, so it looks like a Mac with a touch screen.)
 const ua = navigator.userAgent;
 const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+// Apps' built-in browsers (Instagram, Facebook, Messenger) keep little storage
+// and memory: the music reader is best downloaded in the phone's own browser.
+const inAppBrowser = /Instagram|FBAN|FBAV|FB_IAB|Messenger/.test(ua);
+const IN_APP_TIP = " This is Instagram's or Facebook's own browser: open partsong.app in Safari or Chrome instead (⋯ menu, Open in browser).";
 const deviceKind = /iPhone|iPod/.test(ua) ? "iPhone" : iDevice ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Macintosh/.test(ua) ? "Mac" : /CrOS/.test(ua) ? "ChromeOS" : /Linux/.test(ua) ? "Linux" : "other";
 
 function showError(message) {
@@ -452,7 +456,10 @@ function startWorker() {
         const mb = loaded < 10e6 ? (loaded / 1e6).toFixed(1) : Math.round(loaded / 1e6);
         setEngineStatus(`Downloading music reader (once only): ${mb} / ${Math.round(data.total / 1e6)} MB`);
       } else if (data.type === "progress" && data.stage === "retry") {
-        setEngineStatus(`${engineStatus.split(" · ")[0]} · connection dropped, retrying (${data.attempt})…`);
+        // Why, so a report shows it (a stored piece failing isn't the connection).
+        const was = engineStatus.split(" · ")[0];
+        setEngineStatus(`${was ? `${was} · ` : ""}Download failed (${data.why}), retrying (${data.attempt})…${inAppBrowser ? IN_APP_TIP : ""}`);
+        remember(readerSetup, `Download retry ${data.attempt}: ${data.why}`, 10);
       } else if (data.type === "ready") {
         setEngineStatus("");
         try {
