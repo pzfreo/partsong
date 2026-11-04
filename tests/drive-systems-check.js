@@ -23,6 +23,9 @@ console.log = (...a) => {
 const pdf = new File([await (await fetch("/testdata/tree.pdf")).blob()], "tree.pdf", { type: "application/pdf" });
 const dt = new DataTransfer(); dt.items.add(pdf);
 $("open-xml").files = dt.files; $("open-xml").dispatchEvent(new Event("change"));
+// A PDF opens on its pages (step 1 of 3); reading starts with Read music.
+await waitFor(() => /^Check the pages/.test($("status").textContent), 120000, "pages added");
+$("recognise").click();
 await waitFor(() => !$("systems-check").hidden, 900000, "systems check");
 // It opens as soon as page 1's systems are found, the rest following, and
 // Read music waits for the last.

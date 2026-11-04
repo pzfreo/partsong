@@ -13,6 +13,9 @@ const pdfPath = new URLSearchParams(location.search).get("fixpdf") || "/testdata
 const pdf = new File([await (await fetch(pdfPath)).blob()], "score.pdf", { type: "application/pdf" });
 const dt = new DataTransfer(); dt.items.add(pdf);
 $("open-xml").files = dt.files; $("open-xml").dispatchEvent(new Event("change"));
+// A PDF opens on its pages (step 1 of 3); reading starts with Read music.
+await waitFor(() => /^Check the pages/.test($("status").textContent), 120000, "pages added");
+$("recognise").click();
 await waitFor(() => !$("practice").hidden, 1500000, "read");
 const saved = async () => waitFor(async () => (await db.all()).find((e) => !e.pending && e.pages?.every(Boolean)), 30000, "saved");
 let entry = await saved();

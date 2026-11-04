@@ -9,6 +9,9 @@ await sleep(500);
 const pdf = new File([await (await fetch("/testdata/tree.pdf")).blob()], "tree.pdf", { type: "application/pdf" });
 const dt = new DataTransfer(); dt.items.add(pdf);
 $("open-xml").files = dt.files; $("open-xml").dispatchEvent(new Event("change"));
+// A PDF opens on its pages (step 1 of 3); reading starts with Read music.
+await waitFor(() => /^Check the pages/.test($("status").textContent), 120000, "pages added");
+$("recognise").click();
 await waitFor(() => !$("systems-check").hidden, 600000, "systems check");
 const r = { stopInBar: !$("check-stop").hidden, topHidden: $("recognise").hidden };
 $("check-stop").click();

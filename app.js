@@ -1070,6 +1070,7 @@ async function readScan() {
     const fresh = pages.every((p) => !p.xml);
     // Systems you've just fixed are read as they are.
     if (!rereading && !scanSettings.systemsChecked) await checkSystems(stopped);
+    $("read-step").hidden = false;
     for (let i = 0; i < pages.length; i++) {
       if (pages[i].xml) continue;
       pageLabel = `Page ${i + 1} of ${pages.length}`;
@@ -1128,6 +1129,7 @@ async function readScan() {
     reading = false;
     stopReading = null;
     $("systems-check").hidden = true;
+    $("read-step").hidden = true;
     $("read-hint").hidden = true;
     $("recognise").textContent = "Read music";
     $("recognise").disabled = pages.length === 0;
@@ -1176,11 +1178,12 @@ async function openFiles(files) {
       xmls.push(text);
       name ||= f.name.replace(/\.(musicxml|xml)$/i, "");
     }
-    // An ordinary PDF is sheet music to read: start at once.
+    // An ordinary PDF is sheet music to read: its pages, to look over before
+    // Read music (step 1 of 3, as with photos).
     if (pdfs.length && noReader) showNotice(noReaderText);
     else if (pdfs.length) {
       loadScan();
-      if ((await addFiles(pdfs)) && pages.length) readScan();
+      if ((await addFiles(pdfs)) && pages.length) setPageStatus("Check the pages, then tap Read music.");
     }
     if (!xmls.length) return;
     const title = parsePage(xmls[0]).title || name || "Imported score";

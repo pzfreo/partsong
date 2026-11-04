@@ -12,6 +12,8 @@ if (pdfPath) {
   const pdf = new File([await (await fetch(pdfPath)).blob()], "score.pdf", { type: "application/pdf" });
   const dt = new DataTransfer(); dt.items.add(pdf);
   $("open-xml").files = dt.files; $("open-xml").dispatchEvent(new Event("change"));
+  await waitFor(() => /^Check the pages/.test($("status").textContent), 120000, "pages added");
+  $("recognise").click();
 } else {
   document.querySelector("#library-empty .try-sample").click();
   await waitFor(() => document.querySelectorAll("#pages img").length === 3 && !$("recognise").disabled, 30000, "sample pages");
