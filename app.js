@@ -564,12 +564,13 @@ function resetWorker() {
 
 // The music reader's models (157 MB, once) download in the background soon
 // after the app opens, so the first scan doesn't wait for them. Not on mobile
-// data or data saver where the phone says so (Android Chrome); not again once
-// done. With the exact encoder, the reader then times it once at several
+// data or data saver where the phone says so (Android Chrome); not on
+// iPhone/iPad, which don't say, so the first scan fetches it there; not again
+// once done. With the exact encoder, the reader then times it once at several
 // thread counts (tune). Afterwards the reader is closed unless a scan is using it.
 const READER_FETCHED = "partsong-reader-fetched";
 function prefetchReader() {
-  if (noReader) return;
+  if (iDevice) return;
   let fetched = false;
   try {
     fetched = !!localStorage.getItem(READER_FETCHED);
@@ -630,35 +631,14 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
 
 $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
 
-// Released builds don't read music on iPhone/iPad yet: Safari there runs out
-// of memory reading. Say so before they photograph a whole score. Testers
-// turn reading on with ?ios=1 (remembered; ?ios=0 turns it off), so tests run
-// on the released build; test-site builds (NNN_test) always read.
-function iosReaderOn() {
-  try {
-    const q = new URLSearchParams(location.search).get("ios");
-    if (q === "1") localStorage.setItem("partsong-ios", "1");
-    if (q === "0") localStorage.removeItem("partsong-ios");
-    return localStorage.getItem("partsong-ios") === "1";
-  } catch {
-    return false;
-  }
-}
-const noReader = iDevice && !/_test$|^dev$/.test(VERSION) && !iosReaderOn();
-let noReaderText = "";
-if (noReader) {
+// Reading on iPhone/iPad is experimental: Safari there is short of memory,
+// so a long score can stop part-way (the read then resumes where it stopped).
+if (iDevice) {
   const device = /iPhone|iPod/.test(ua) ? "iPhone" : "iPad";
-  $("open-xml").previousSibling.textContent = "Open shared score";
-  noReaderText =
-    `This PDF is sheet music to scan, which doesn't work on ${device} yet. ` +
-    "Here you can only open scores shared from Partsong (their files end in .partsong.pdf).";
-  const text =
-    `Scanning doesn't work on ${device} yet, so here you can only open scores shared from Partsong. ` +
-    `Scan on an Android phone or a computer using Chrome or Edge, then share the score to your ${device} to play it.`;
-  for (const p of document.querySelectorAll(".no-reader")) Object.assign(p, { textContent: text, hidden: false });
-  // Hides everything that would start a read (styles.css): Scan music, the
-  // sample, Read again, Check and fix systems.
-  document.body.classList.add("no-reader-device");
+  $("device-note").textContent =
+    `Scanning on ${device} is experimental: ${device}s are short of memory for reading music, so a long score may stop and restart part-way. ` +
+    "For long scores, a computer or Android phone using Chrome is more reliable.";
+  $("device-note").hidden = false;
 }
 
 // The sample score (samples/tallis-if-ye-love-me.pdf, from CPDL):
@@ -1218,8 +1198,7 @@ async function openFiles(files) {
     }
     // An ordinary PDF is sheet music to read: its pages, to look over before
     // Read music (step 1 of 3, as with photos).
-    if (pdfs.length && noReader) showNotice(noReaderText);
-    else if (pdfs.length) {
+    if (pdfs.length) {
       loadScan();
       if ((await addFiles(pdfs)) && pages.length) setPageStatus("Check the pages, then tap Read music.");
     }

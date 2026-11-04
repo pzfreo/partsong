@@ -120,7 +120,6 @@
         <button id="new-scan" class="primary">Scan music</button>
         <label class="button">Open PDF<input id="open-xml" type="file" accept=".pdf,application/pdf,.html,text/html,.musicxml,.xml,application/vnd.recordare.musicxml+xml" multiple hidden></label>
       </div>
-      <p class="no-reader" hidden></p>
       <p class="muted beta-note">Partsong is new and still in beta, so it won't read every score perfectly yet. If something goes wrong, please <button class="link report-open">report a problem</button>: it really helps us improve it.</p>
       <h2>Your scores</h2>
       <div id="install-card" class="install-card" hidden>
@@ -152,7 +151,7 @@
     <section id="scan" hidden>
       <p class="check-step step1"><strong>Step 1 of 3: add your pages</strong></p>
       <p class="muted step1">Add one photo per page, in order, or a PDF. Hold the phone square to the page in good light.</p>
-      <p class="no-reader" hidden></p>
+      <p id="device-note" class="device-note step1" hidden></p>
       <div class="actions step1">
         <label class="button primary">Take photo<input id="camera" type="file" accept="image/*" capture="environment" hidden></label>
         <label class="button">Add images or PDF<input id="gallery" type="file" accept="image/*,application/pdf,.pdf" multiple hidden></label>
