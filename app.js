@@ -920,43 +920,68 @@ function doubtfulPages(todo) {
 
 async function checkSystems(stopped) {
   const todo = pages.map((_, i) => i).filter((i) => !pages[i].xml);
-  for (const i of todo) {
-    pageLabel = `Page ${i + 1} of ${pages.length}`;
-    setPageStatus("finding systems…");
-    try {
-      const r = await Promise.race([layoutPage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
-      pages[i].layout = r.systems;
-      pages[i].parts = r.parts;
-      pages[i].classes = r.classes;
-    } catch (e) {
-      // No music on it: the reading leaves it out.
-      if (e instanceof Stopped || !NO_MUSIC.test(e.message)) throw e;
+  // Each page is shown to check as soon as its systems are found, so you
+  // check page 1 while the rest are found; Read music waits for the last.
+  let check = null;
+  try {
+    for (const i of todo) {
+      // Progress is on the status line until the check opens, then on its bar.
+      pageLabel = check ? "" : `Page ${i + 1} of ${pages.length}`;
+      if (!check) setPageStatus("finding systems…");
+      check?.waiting(`Finding systems: page ${i + 1} of ${pages.length}…`);
+      try {
+        const r = await Promise.race([layoutPage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
+        pages[i].layout = r.systems;
+        pages[i].parts = r.parts;
+        pages[i].classes = r.classes;
+      } catch (e) {
+        // No music on it: the reading leaves it out.
+        if (e instanceof Stopped || !NO_MUSIC.test(e.message)) throw e;
+      }
+      if (pages[i].layout) {
+        if (!check) {
+          pageLabel = "";
+          setPageStatus("");
+          check = openCheck();
+        }
+        check.add(i);
+      }
     }
-  }
-  pageLabel = "";
-  const found = `Systems (staves in each): ${todo.map((i) => `p${i + 1} ${(pages[i].layout ?? []).map((sys) => sys.length).join(",") || "none"} parts ${pages[i].parts?.join("") ?? "-"}`).join("; ")}`;
-  console.log("[omr]", found);
-  remember(readerLog, found, 40);
-  const shown = todo.filter((i) => pages[i].layout);
-  if (shown.length) {
-    setPageStatus("");
-    const hints = await Promise.race([askToCheck(shown, doubtfulPages(todo)), stopped]).finally(() => ($("systems-check").hidden = true));
-    if (Object.keys(hints).length) {
-      track("systems-check-fixed");
-      scanSettings.systemHints = { ...(scanSettings.systemHints ?? {}), ...hints };
+    pageLabel = "";
+    const found = `Systems (staves in each): ${todo.map((i) => `p${i + 1} ${(pages[i].layout ?? []).map((sys) => sys.length).join(",") || "none"} parts ${pages[i].parts?.join("") ?? "-"}`).join("; ")}`;
+    console.log("[omr]", found);
+    remember(readerLog, found, 40);
+    if (check) {
+      const hints = await Promise.race([check.done(doubtfulPages(todo)), stopped]);
+      if (Object.keys(hints).length) {
+        track("systems-check-fixed");
+        scanSettings.systemHints = { ...(scanSettings.systemHints ?? {}), ...hints };
+      }
     }
+  } finally {
+    pageLabel = "";
+    $("systems-check").hidden = true;
   }
   scanSettings.systemsChecked = true;
   if (scanId) await db.update(scanId, { systemHints: scanSettings.systemHints, systemsChecked: true }).catch(() => {});
 }
 
-// Shows the pages with their systems; resolves with the systems of the pages
-// changed (page -> [top, bottom] ranges) when Read music is tapped.
-function askToCheck(shown, doubtful) {
+// The check screen: pages are added as their systems are found; done()
+// marks the unusual ones, lets Read music be tapped, and resolves with the
+// systems of the pages changed (page -> [top, bottom] ranges).
+const CHECK_INTRO = "Red lines mark systems. Tap between staves to change.";
+function openCheck() {
   const drafts = {};
-  $("check-list").replaceChildren(
-    ...shown.flatMap((i) => {
-      const label = Object.assign(document.createElement("p"), { className: "check-page", textContent: `Page ${i + 1}${doubtful.includes(i) ? ": looks unusual" : ""}` });
+  const labels = {};
+  $("check-list").replaceChildren();
+  $("check-intro").textContent = CHECK_INTRO;
+  $("check-done").disabled = true;
+  $("check-done").onclick = null;
+  $("systems-check").hidden = false;
+  $("systems-check").scrollIntoView({ behavior: "smooth", block: "start" });
+  return {
+    add(i) {
+      const label = (labels[i] = Object.assign(document.createElement("p"), { className: "check-page", textContent: `Page ${i + 1}` }));
       const div = Object.assign(document.createElement("div"), { className: "page" });
       const img = document.createElement("img");
       img.alt = `Page ${i + 1}`;
@@ -979,21 +1004,27 @@ function askToCheck(shown, doubtful) {
         if (toggleGap(d, ((e.clientY - rect.top) / rect.height) * d.h)) drawGaps(g, d, d.w);
       };
       div.append(img, svg);
-      return [label, div];
-    }),
-  );
-  const which = doubtful.map((i) => i + 1);
-  const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
-  $("check-intro").textContent = "Red lines mark systems. Tap between staves to change." + (which.length ? ` ${named} unusual.` : "");
-  $("systems-check").hidden = false;
-  $("systems-check").scrollIntoView({ behavior: "smooth", block: "start" });
-  return new Promise((resolve) => {
-    $("check-done").onclick = () => {
-      const hints = {};
-      for (const [i, d] of Object.entries(drafts)) if (d.h && d.splits.some((x, k) => x !== d.initial[k])) hints[i] = fixBands(d, d.h);
-      resolve(hints);
-    };
-  });
+      $("check-list").append(label, div);
+    },
+    waiting(text) {
+      $("check-wait").textContent = text;
+    },
+    done(doubtful) {
+      for (const i of doubtful) if (labels[i]) labels[i].textContent += ": looks unusual";
+      const which = doubtful.map((i) => i + 1);
+      const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
+      $("check-intro").textContent = CHECK_INTRO + (which.length ? ` ${named} unusual.` : "");
+      $("check-wait").textContent = "Once you're done:";
+      $("check-done").disabled = false;
+      return new Promise((resolve) => {
+        $("check-done").onclick = () => {
+          const hints = {};
+          for (const [i, d] of Object.entries(drafts)) if (d.h && d.splits.some((x, k) => x !== d.initial[k])) hints[i] = fixBands(d, d.h);
+          resolve(hints);
+        };
+      });
+    },
+  };
 }
 
 // While reading, the Read music button stops it: the reader is shut down at

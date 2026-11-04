@@ -1,5 +1,5 @@
 // Two phases: Read music first finds the systems on every page (no staff is
-// read yet) and shows them all to check; tapping Read music there reads the
+// read yet), showing each page to check as soon as it's found; tapping Read music there reads the
 // staves with them. There was a tree, page 1, whose piano the reader leaves
 // out of the choir's systems, fixed here reads once with those systems, and
 // the parts panel afterwards doesn't ask you to check the systems again.
@@ -24,8 +24,13 @@ const pdf = new File([await (await fetch("/testdata/tree.pdf")).blob()], "tree.p
 const dt = new DataTransfer(); dt.items.add(pdf);
 $("open-xml").files = dt.files; $("open-xml").dispatchEvent(new Event("change"));
 await waitFor(() => !$("systems-check").hidden, 900000, "systems check");
-await sleep(3000);
-const r = { staffsReadBeforeCheck: staffReads, intro: $("check-intro").textContent };
+// It opens as soon as page 1's systems are found, the rest following, and
+// Read music waits for the last.
+const r = { firstShown: document.querySelectorAll("#check-list .check-page").length, lockedWhileFinding: $("check-done").disabled, waitText: $("check-wait").textContent };
+await waitFor(() => !$("check-done").disabled, 900000, "all systems found");
+r.doneText = $("check-wait").textContent;
+r.staffsReadBeforeCheck = staffReads;
+r.intro = $("check-intro").textContent;
 r.pagesShown = [...document.querySelectorAll("#check-list .check-page")].map((p) => p.textContent).join(" | ");
 const svg = document.querySelector("#check-list svg");
 await waitFor(() => svg.getAttribute("viewBox"), 30000, "photo");
@@ -55,5 +60,5 @@ r.checkedKept = entry.systemsChecked === true;
 // send you back to check the systems you've just OK'd.
 r.doubtShown = !$("parts-doubt").hidden;
 r.fixStepHidden = $("doubt-fix-step").hidden;
-r.ok = r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.doubtShown && r.fixStepHidden;
+r.ok = r.firstShown === 1 && r.lockedWhileFinding && /^Finding systems: page 2 of 6/.test(r.waitText) && r.doneText === "Once you're done:" && r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.doubtShown && r.fixStepHidden;
 window.result = r;
