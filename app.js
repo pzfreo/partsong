@@ -22,8 +22,22 @@ const remember = (list, item, max) => {
   if (list.length > max) list.shift();
 };
 
+// The kind of device, for counting errors by it (never anything finer).
+// (iPadOS asks for desktop sites, so it looks like a Mac with a touch screen.)
+const ua = navigator.userAgent;
+const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const deviceKind = /iPhone|iPod/.test(ua) ? "iPhone" : iDevice ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Macintosh/.test(ua) ? "Mac" : /CrOS/.test(ua) ? "ChromeOS" : /Linux/.test(ua) ? "Linux" : "other";
+
 function showError(message) {
   remember(recentErrors, message, 10);
+  // Counted once per kind of error a visit, as "error (Android): …".
+  const reason = failureReason(message);
+  showError.counted ??= new Set();
+  if (!showError.counted.has(reason)) {
+    showError.counted.add(reason);
+    track(`error (${deviceKind})`);
+    track(`error (${deviceKind}): ${reason}`);
+  }
   const el = $("error-toast");
   el.textContent = `Something went wrong: ${message}`;
   el.hidden = false;
@@ -610,12 +624,20 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
 $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
 
 // Released builds don't read music on iPhone/iPad yet: Safari there runs out
-// of memory reading (tests continue on the test site, whose builds are
-// stamped NNN_test). Say so before they photograph a whole score.
-// (iPadOS asks for desktop sites, so it looks like a Mac with a touch screen.)
-const ua = navigator.userAgent;
-const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
-const noReader = iDevice && !/_test$|^dev$/.test(VERSION);
+// of memory reading. Say so before they photograph a whole score. Testers
+// turn reading on with ?ios=1 (remembered; ?ios=0 turns it off), so tests run
+// on the released build; test-site builds (NNN_test) always read.
+function iosReaderOn() {
+  try {
+    const q = new URLSearchParams(location.search).get("ios");
+    if (q === "1") localStorage.setItem("partsong-ios", "1");
+    if (q === "0") localStorage.removeItem("partsong-ios");
+    return localStorage.getItem("partsong-ios") === "1";
+  } catch {
+    return false;
+  }
+}
+const noReader = iDevice && !/_test$|^dev$/.test(VERSION) && !iosReaderOn();
 let noReaderText = "";
 if (noReader) {
   const device = /iPhone|iPod/.test(ua) ? "iPhone" : "iPad";
@@ -649,7 +671,7 @@ function failureReason(e) {
   const last = String(e?.message ?? e).trim().split("\n").at(-1) || e?.name || "unknown";
   return (
     last
-      .replace(/^(Exception|Error): /, "")
+      .replace(/^(Uncaught )?(Exception|Error): /, "")
       .replace(/(\/[\w.-]+)+/g, "…")
       .replace(/\d+(\.\d+)?/g, "N")
       .slice(0, 80) || "unknown"
@@ -1045,7 +1067,8 @@ async function readScan() {
       return;
     }
     track("read-failed");
-    track(`read-failed: ${failureReason(e)}`);
+    track(`read-failed (${deviceKind})`);
+    track(`read-failed (${deviceKind}): ${failureReason(e)}`);
     // A long error ends with the actual error; show that first, since the
     // whole message can run off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
