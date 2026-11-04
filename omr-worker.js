@@ -447,19 +447,26 @@ async function openPage(imageBytes, systemsJson, packed) {
   };
   const message = () => new TextDecoder().decode(new Uint8Array(mem(), rs.msg_ptr(), rs.msg_len()));
 
+  const ms = {};
+  let t = performance.now();
+  const lap = (k) => { const n = performance.now(); ms[k] = n - t; t = n; };
   const img = await pixels(imageBytes);
+  lap("decode");
   const ranges = systemsJson ? JSON.parse(systemsJson).flat() : [];
   const rgba = copyIn(img.data);
   const sys = copyIn(Float64Array.from(ranges));
   const tiles = rs.page_open(rgba, img.width, img.height, sys, ranges.length / 2);
   rs.dealloc(rgba, img.data.byteLength);
+  lap("tiles");
 
   let classes = packed ? await squeeze(packed, "deflate", DecompressionStream) : null;
   if (classes?.length !== tiles * WIN * WIN) classes = await segment(rs, tiles);
+  lap("segnet");
   const cp = copyIn(classes);
   if (rs.page_segment(cp) !== 0) throw new Error(message());
   rs.dealloc(cp, classes.byteLength);
-  return { rs, mem, copyIn, message, classes };
+  lap("segment");
+  return { rs, mem, copyIn, message, classes, ms };
 }
 
 // Segmentation, a batch of tiles at a time; each tile's class map is the
@@ -499,9 +506,15 @@ async function segment(rs, tiles) {
 // The page's systems before reading any staff (see page_layout), and its
 // segmentation to read it with later.
 async function layout(imageBytes, systemsJson) {
-  const { rs, message, classes } = await openPage(imageBytes, systemsJson);
+  const t = performance.now();
+  const { rs, message, classes, ms: open } = await openPage(imageBytes, systemsJson);
+  const t1 = performance.now();
   rs.page_layout();
-  return { ...JSON.parse(message()), classes: await squeeze(classes, "deflate", CompressionStream) };
+  const t2 = performance.now();
+  const out = { ...JSON.parse(message()), classes: await squeeze(classes, "deflate", CompressionStream) };
+  const t3 = performance.now();
+  out.timing = `decode ${Math.round(open.decode)} ms, tiles ${Math.round(open.tiles)} ms, segnet+argmax ${Math.round(open.segnet)} ms, segment ${Math.round(open.segment)} ms, layout ${Math.round(t2 - t1)} ms, pack ${Math.round(t3 - t2)} ms (total open ${Math.round(t1 - t)})`;
+  return out;
 }
 
 async function recognise(imageBytes, systemsJson, packed) {
@@ -576,7 +589,13 @@ self.onmessage = async ({ data }) => {
     } else if (data.type === "layout") {
       await ready;
       await tuning;
+      const t0 = performance.now();
+      runTimes = [];
       const r = await layout(data.image, data.systems ?? "");
+      const ms = Math.round(performance.now() - t0);
+      const seg = runTimes[sessionIds.get(MODELS[0])] ?? { ms: 0, calls: 0 };
+      post({ type: "log", msg: `Systems in ${ms} ms: segnet ${Math.round(seg.ms)} ms/${seg.calls} calls; ${r.timing}` });
+      delete r.timing;
       post({ type: "result", id: data.id, ...r }, [r.classes.buffer]);
     } else if (data.type === "recognise") {
       await ready;
