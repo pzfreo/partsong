@@ -645,10 +645,15 @@ if (iDevice) {
 // opens the scan screen with its pages added, ready for Read music.
 // Anonymous usage counts (GoatCounter, no cookies; see index.html): which
 // features get used, never titles or music. Silent if blocked or offline.
-function track(name, title = name) {
+// GoatCounter's script loads after the app starts (and not at all if
+// blocked): an early count waits up to 15 s for it.
+function track(name, title = name, tries = 30) {
   try {
-    window.goatcounter?.count?.({ path: name, title, event: true });
-  } catch {}
+    if (window.goatcounter?.count) return window.goatcounter.count({ path: name, title, event: true });
+  } catch {
+    return;
+  }
+  if (tries > 0) setTimeout(() => track(name, title, tries - 1), 500);
 }
 
 // Whether people come back: once a day, on opening, how many different days
@@ -674,8 +679,6 @@ async function countReturn() {
     localStorage.setItem(USE_DAYS, JSON.stringify(use));
     const since = Math.round((Date.parse(today) - Date.parse(use.first)) / 864e5);
     const scores = (await db.all().catch(() => [])).filter((e) => !e.pending).length;
-    // GoatCounter's script loads after the app starts (and not at all if blocked).
-    for (let i = 0; i < 30 && !window.goatcounter?.count; i++) await new Promise((r) => setTimeout(r, 500));
     track(`use: day ${group(use.days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
     track(`use: first ${since === 0 ? "today" : since < 7 ? "1–6 days ago" : since < 28 ? "1–4 weeks ago" : since < 91 ? "1–3 months ago" : "3+ months ago"}`);
     track(`library: ${group(scores, [1, 2, 3, 4, 6, 11, 21, 51])} scores`);
@@ -724,10 +727,14 @@ function resumeScan(entry) {
 
 // On launch, carry on with a scan that was interrupted, unless it has already
 // been resumed twice without progress (e.g. the phone keeps running out of memory).
+// Counted, by kind of device: the page itself can't report being killed.
 async function resumeUnfinished() {
   const entry = (await db.all().catch(() => [])).find((e) => e.pending && !e.stopped);
-  if (!entry || (entry.resumes ?? 0) >= 2) return;
-  await db.update(entry.id, { resumes: (entry.resumes ?? 0) + 1 }).catch(() => {});
+  const resumes = entry?.resumes ?? 0;
+  if (!entry || resumes > 2) return;
+  await db.update(entry.id, { resumes: resumes + 1 }).catch(() => {});
+  if (resumes === 2) return track(`read-gave-up (${deviceKind})`); // once
+  track(`read-restarted (${deviceKind})`);
   resumeScan(entry);
 }
 
@@ -1119,6 +1126,7 @@ async function readScan() {
     remember(readerLog, `Read ${plural(pages.length, "page")} in ${duration(secs)}${fresh ? "" : " (carried on from an earlier read)"}`, 40);
     setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${pages.length} page${pages.length === 1 ? "" : "s"}`);
+    track(`read-ok (${deviceKind})`);
   } catch (e) {
     pageLabel = "";
     if (e instanceof Stopped) {
