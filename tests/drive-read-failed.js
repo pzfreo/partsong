@@ -1,5 +1,5 @@
-// A reading that fails counts "read-failed", "read-failed (<device>)" and
-// "read-failed (<device>): <why>", where the reason is the error's last line (no file paths, numbers as N) and never the
+// A reading that fails counts "read-failed", "read-failed (<device> <version>)" and
+// "read-failed (<device> <version>): <why>", where the reason is the error's last line (no file paths, numbers as N) and never the
 // score's name. Reads a blank page (no staves). Run against http://localhost:8765/index.html.
 const events = []; window.goatcounter = { count: (e) => events.push(e) };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -18,7 +18,7 @@ const dt = new DataTransfer(); dt.items.add(new File([blob], "blank.png", { type
 $("gallery").files = dt.files; $("gallery").dispatchEvent(new Event("change"));
 await waitFor(() => !$("recognise").disabled, 20000, "page added");
 $("recognise").click();
-await waitFor(() => events.some((e) => /^read-failed \(\w+\): /.test(e.path)), 600000, "read-failed");
+await waitFor(() => events.some((e) => /^read-failed \(\w+ \w+\): /.test(e.path)), 600000, "read-failed");
 // Any error shown counts "error (<device>)" and "error (<device>): <why>",
 // once per kind of error a visit.
 window.reportError(new Error("Couldn't share: relay 503 at /x/y.js"));

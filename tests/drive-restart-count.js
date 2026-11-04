@@ -20,5 +20,5 @@ const r = {};
 await seed(0); r.restarted = await open();
 await seed(2); r.gaveUp = await open(); r.gaveUpAgain = await open();
 await seed(null);
-r.ok = r.restarted.some((p) => /^read-restarted \(\w+\)$/.test(p)) && /^read-gave-up \(\w+\)$/.test(r.gaveUp.join()) && r.gaveUpAgain.length === 0;
+r.ok = r.restarted.some((p) => /^read-restarted \(\w+ \w+\)$/.test(p)) && /^read-gave-up \(\w+ \w+\)$/.test(r.gaveUp.join()) && r.gaveUpAgain.length === 0;
 window.result = r;

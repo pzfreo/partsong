@@ -30,7 +30,13 @@ const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigato
 // and memory: the music reader is best downloaded in the phone's own browser.
 const inAppBrowser = /Instagram|FBAN|FBAV|FB_IAB|Messenger/.test(ua);
 const IN_APP_TIP = " This is Instagram's or Facebook's own browser: open partsong.app in Safari or Chrome instead (⋯ menu, Open in browser).";
+const VERSION = new URL(import.meta.url).searchParams.get("v") || "dev";
+// Deploys are numbered by how many commits main has (see pages.yml), so a
+// newer version always has a bigger number.
+const SHOWN_VERSION = /^\d+$/.test(VERSION) ? `v${VERSION}` : VERSION;
 const deviceKind = /iPhone|iPod/.test(ua) ? "iPhone" : iDevice ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Macintosh/.test(ua) ? "Mac" : /CrOS/.test(ua) ? "ChromeOS" : /Linux/.test(ua) ? "Linux" : "other";
+// Counts by device carry the version too, to see whether a fix worked.
+const deviceTag = `${deviceKind} ${SHOWN_VERSION}`;
 
 function showError(message) {
   remember(recentErrors, message, 10);
@@ -39,8 +45,8 @@ function showError(message) {
   showError.counted ??= new Set();
   if (!showError.counted.has(reason)) {
     showError.counted.add(reason);
-    track(`error (${deviceKind})`);
-    track(`error (${deviceKind}): ${reason}`);
+    track(`error (${deviceTag})`);
+    track(`error (${deviceTag}): ${reason}`);
   }
   const el = $("error-toast");
   el.textContent = `Something went wrong: ${message}`;
@@ -119,10 +125,6 @@ window.addEventListener("popstate", (e) => {
 // ---------- bug reports (emailed to bugs@partsong.app) ----------
 
 const REPORT_TO = "bugs@partsong.app";
-const VERSION = new URL(import.meta.url).searchParams.get("v") || "dev";
-// Deploys are numbered by how many commits main has (see pages.yml), so a
-// newer version always has a bigger number.
-const SHOWN_VERSION = /^\d+$/.test(VERSION) ? `v${VERSION}` : VERSION;
 $("header-version").textContent = `beta · ${SHOWN_VERSION}`;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -733,8 +735,8 @@ async function resumeUnfinished() {
   const resumes = entry?.resumes ?? 0;
   if (!entry || resumes > 2) return;
   await db.update(entry.id, { resumes: resumes + 1 }).catch(() => {});
-  if (resumes === 2) return track(`read-gave-up (${deviceKind})`); // once
-  track(`read-restarted (${deviceKind})`);
+  if (resumes === 2) return track(`read-gave-up (${deviceTag})`); // once
+  track(`read-restarted (${deviceTag})`);
   resumeScan(entry);
 }
 
@@ -1126,7 +1128,7 @@ async function readScan() {
     remember(readerLog, `Read ${plural(pages.length, "page")} in ${duration(secs)}${fresh ? "" : " (carried on from an earlier read)"}`, 40);
     setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${pages.length} page${pages.length === 1 ? "" : "s"}`);
-    track(`read-ok (${deviceKind})`);
+    track(`read-ok (${deviceTag})`);
   } catch (e) {
     pageLabel = "";
     if (e instanceof Stopped) {
@@ -1142,8 +1144,8 @@ async function readScan() {
       return;
     }
     track("read-failed");
-    track(`read-failed (${deviceKind})`);
-    track(`read-failed (${deviceKind}): ${failureReason(e)}`);
+    track(`read-failed (${deviceTag})`);
+    track(`read-failed (${deviceTag}): ${failureReason(e)}`);
     // A long error ends with the actual error; show that first, since the
     // whole message can run off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
