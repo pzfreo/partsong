@@ -17,19 +17,42 @@ function open() {
   dbPromise ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
     req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: "id" });
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Safari closes the connection of a page left in the background; open
+      // a fresh one next time rather than keep using the closed one.
+      db.onclose = () => (dbPromise = undefined);
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = undefined;
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   }).then(migrateLegacy);
+  dbPromise.catch(() => (dbPromise = undefined));
   return dbPromise;
 }
 
-function run(db, mode, fn) {
+function transact(db, mode, fn) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, mode);
     const result = fn(tx.objectStore(STORE));
     tx.oncomplete = () => resolve(result.result ?? result);
     tx.onerror = tx.onabort = () => reject(tx.error);
   });
+}
+
+// A connection closed without a close event ("The database connection is
+// closing", iPhone Safari) throws InvalidStateError: reopen and try once more.
+async function run(mode, fn) {
+  try {
+    return await transact(await open(), mode, fn);
+  } catch (e) {
+    if (e?.name !== "InvalidStateError") throw e;
+    dbPromise = undefined;
+    return transact(await open(), mode, fn);
+  }
 }
 
 async function migrateLegacy(db) {
@@ -40,7 +63,7 @@ async function migrateLegacy(db) {
     return db;
   }
   if (!Array.isArray(legacy)) return db;
-  await run(db, "readwrite", (store) => {
+  await transact(db, "readwrite", (store) => {
     for (const entry of legacy) store.put({ images: [], ...entry });
     return {};
   });
@@ -62,19 +85,18 @@ function fromStored(entry) {
 }
 
 export async function all() {
-  return (await run(await open(), "readonly", (store) => store.getAll())).map(fromStored);
+  return (await run("readonly", (store) => store.getAll())).map(fromStored);
 }
 
 export async function put(entry) {
   navigator.storage?.persist?.();
   const stored = await toStored(entry);
-  return run(await open(), "readwrite", (store) => store.put(stored));
+  return run("readwrite", (store) => store.put(stored));
 }
 
 export async function update(id, changes) {
   const stored = await toStored(changes);
-  const db = await open();
-  return run(db, "readwrite", (store) => {
+  return run("readwrite", (store) => {
     const req = store.get(id);
     req.onsuccess = () => req.result && store.put({ ...req.result, ...stored });
     return {};
@@ -82,5 +104,5 @@ export async function update(id, changes) {
 }
 
 export async function remove(id) {
-  return run(await open(), "readwrite", (store) => store.delete(id));
+  return run("readwrite", (store) => store.delete(id));
 }
