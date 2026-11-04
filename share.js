@@ -144,7 +144,9 @@ async function pdfFile(entry, photos) {
 // app alike. If the upload fails, the PDF is shared instead.
 
 const RELAY_MAGIC = "PSR1";
-const RELAY_WAIT = 60000; // ms before an upload or fetch counts as failed
+const RELAY_WAIT = 60000; // ms before an upload or fetch counts as failed (at least)
+const RELAY_MAX = 40e6; // the relay's limit (relay/index.js)
+const SLOW_LINK = 50e3; // bytes/s: a big score's upload gets as long as this rate needs
 const relayUrl = () => {
   try {
     const own = localStorage.getItem("partsong.relay"); // tests point this at a local relay
@@ -157,10 +159,12 @@ const unb64url = (s) => Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("
 
 async function relayFetch(path, init = {}) {
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), RELAY_WAIT);
+  const wait = Math.max(RELAY_WAIT, ((init.body?.size ?? 0) / SLOW_LINK) * 1000);
+  const timer = setTimeout(() => ctl.abort(), wait);
   try {
     const res = await fetch(relayUrl() + path, { ...init, signal: ctl.signal });
-    if (!res.ok) throw new Error(`relay ${res.status}`);
+    if (res.status === 413) throw new Error("the score is too big for a link");
+    if (!res.ok) throw new Error(`the link service said ${res.status}`);
     return res;
   } finally {
     clearTimeout(timer);
@@ -182,21 +186,25 @@ export async function shareKey(entry) {
 // Links last a year on the relay; reuse one only while it has a while to run.
 export const LINK_REUSE_MS = 330 * 864e5;
 
-// What a share sends: { file, link }; link null when the relay couldn't take
-// it (then the file is shared).
+// What a share sends: { file, link, why }; link null when the relay couldn't take
+// it (then the file is shared), and why says why: too big, too slow, or unreachable.
 export async function shareableScore(entry) {
   const file = await scoreFile(entry);
   const id = b64url(crypto.getRandomValues(new Uint8Array(16)));
   const raw = crypto.getRandomValues(new Uint8Array(32));
   const link = `${new URL("./", location.href).href}#s=${id}.${b64url(raw)}`;
+  const mb = Math.max(1, Math.round(file.size / 1e6));
   try {
     const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt"]);
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, await file.arrayBuffer());
-    await relayFetch(`/s/${id}`, { method: "PUT", body: new Blob([RELAY_MAGIC, iv, sealed]) });
+    const body = new Blob([RELAY_MAGIC, iv, sealed]);
+    if (body.size > RELAY_MAX) return { file, link: null, why: `the score is too big for a link (${mb} MB)` };
+    await relayFetch(`/s/${id}`, { method: "PUT", body });
     return { file, link };
-  } catch {
-    return { file, link: null };
+  } catch (e) {
+    const why = e.name === "AbortError" ? `the upload took too long: ${mb} MB on this connection` : e.name === "TypeError" ? "couldn't reach the link service" : e.message;
+    return { file, link: null, why };
   }
 }
 

@@ -88,5 +88,20 @@ $("tempo").value = 100; $("tempo").dispatchEvent(new Event("input", { bubbles: t
 $("panel-close").click(); await sleep(200);
 s = await share();
 r.relayDown = { status: s.status, text: s.shared.text ?? null, file: s.shared.files[0].name, pdfHasLink: await pdfHasLink(s.shared.files[0]) };
+
+// 6. The same on a computer, from Share part with score: the PDF is
+// downloaded, and Partsong says why there's no link (it used to just say
+// "Saved ✓", like Export PDF).
+Object.defineProperty(navigator, "userAgentData", { value: { mobile: false }, configurable: true });
+let downloaded = null;
+const click = HTMLAnchorElement.prototype.click;
+HTMLAnchorElement.prototype.click = function () { if (this.download) downloaded = this.download; else click.call(this); };
+$("settings").click(); await sleep(300);
+$("tempo").value = 110; $("tempo").dispatchEvent(new Event("input", { bubbles: true })); $("tempo").dispatchEvent(new Event("change", { bubbles: true })); await sleep(600);
+$("share-score").click();
+await waitFor(() => downloaded, 90000, "desktop download");
+await sleep(100);
+r.desktopRelayDown = { downloaded, label: $("share-score").textContent, says: $("error-toast").hidden ? null : $("error-toast").textContent };
+HTMLAnchorElement.prototype.click = click;
 localStorage.removeItem("partsong.relay");
 window.result = r;

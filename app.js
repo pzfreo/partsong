@@ -1206,14 +1206,21 @@ async function shareScore(id, button, status, label) {
       }
     }
     const linked = !!prepared.link;
+    const why = prepared.why;
     const how = linked ? await shareLink(prepared.link, prepared.title) : await shareFile(prepared.file, prepared.title);
     if (how === "shared" || how === "downloaded" || how === "copied") track(linked ? "share" : "share-pdf");
     if (how !== "retry") prepared = null;
     if (how === "retry") say("ready", "Ready to share: tap again.", "Ready to share");
     else if (how === "cancelled") say("idle", "");
     else if (how === "copied") say("done", "Name and link copied: paste them into a message.", "Link copied ✓");
-    else if (how === "downloaded") say("done", "Saved to Downloads.", "Saved ✓");
-    else say("done", linked ? "Shared." : "Shared as a PDF (the link service didn't respond).", linked ? "Shared ✓" : "Shared as PDF ✓");
+    else if (!linked) {
+      // No link: say why, and that the PDF is what to send instead.
+      const where = how === "downloaded" ? "saved the PDF to Downloads" : "shared the PDF";
+      const long = `Couldn't make a link (${why ?? "the link service didn't respond"}), so Partsong ${where} instead: send that file, which opens in Partsong.`;
+      say("done", long, how === "downloaded" ? "Saved PDF ✓" : "Shared as PDF ✓");
+      if (!status) showError(long);
+    } else if (how === "downloaded") say("done", "Saved to Downloads.", "Saved ✓");
+    else say("done", "Shared.", "Shared ✓");
   } catch (e) {
     prepared = null;
     say("error", `Couldn't share: ${e.message}`);
