@@ -88,7 +88,7 @@ self.addEventListener("fetch", (e) => {
         const res = await fetch(e.request);
         if (res.ok) cache.put(e.request, res.clone());
         return res;
-      }),
+      }).then(isolated), // the reader's threads are workers made from these files: without the headers an isolated page refuses them
     );
   } else if (url.origin === location.origin && !url.pathname.includes("/models/")) {
     // no-cache: revalidate with the server so app updates show up on the next
