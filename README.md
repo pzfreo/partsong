@@ -97,7 +97,7 @@ then *Add to Home screen*.
 - **Share audio** (`audio.js`, `Player.render`): a score's settings can share
   what Play plays (bars, repeats, your part or marked part, the others' volume,
   sound, tempo, pitch) as an audio file, rendered offline in a few seconds:
-  AAC in an `.m4a` (WebCodecs `AudioEncoder`, muxed by mp4-muxer from jsdelivr,
+  AAC in an `.m4a` (WebCodecs `AudioEncoder`, muxed by mp4-muxer (served from lib/),
   ~0.6 MB a minute) where the browser can encode AAC, else WAV.
   `tests/drive-share-audio.js`.
 - **Sharing** (`share.js`): the share icon (by the score title, or on each
@@ -194,6 +194,7 @@ then *Add to Home screen*.
 
 ```sh
 scripts/fetch-models.sh        # homr's models -> models/
+scripts/fetch-libs.sh          # onnxruntime-web, pdf.js, OSMD, mp4-muxer -> lib/
 scripts/build-omr.sh           # omr-rs -> omr/partsong_omr.wasm (needs Rust)
 python3 -m http.server 8765    # then open http://localhost:8765
 ```

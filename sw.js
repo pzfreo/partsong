@@ -1,5 +1,5 @@
 // App shell: network-first so updates arrive, cache as offline fallback.
-// CDN libraries (onnxruntime-web, OSMD) are versioned: cache-first.
+// Libraries in lib/ (onnxruntime-web, pdf.js, OSMD; versioned paths): cache-first.
 // models/ is cached by omr-worker.js itself, so it passes straight through.
 const SHELL = "partscanner-shell-v1";
 const CDN = "partscanner-cdn-v1";
@@ -45,7 +45,7 @@ self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 // app cross-origin isolated, which lets the music reader's WASM use several
 // threads. require-corp, not credentialless: Safari ignores credentialless,
 // which left iPhones on one thread. Every cross-origin file the app loads
-// allows it (jsDelivr sends CORP; GoatCounter's script is fetched with CORS).
+// allows it (GoatCounter's script is fetched with CORS).
 // Applies from the first load the worker controls.
 function isolated(res) {
   if (!res || res.type === "opaqueredirect" || !res.status) return res;
@@ -80,7 +80,7 @@ self.addEventListener("fetch", (e) => {
     return;
   }
   if (e.request.method !== "GET") return;
-  if (url.hostname === "cdn.jsdelivr.net") {
+  if (url.origin === location.origin && url.pathname.includes("/lib/")) {
     e.respondWith(
       caches.open(CDN).then(async (cache) => {
         const hit = await cache.match(e.request);

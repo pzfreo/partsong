@@ -3,7 +3,7 @@
 // Chrome on Android, macOS and Windows), otherwise WAV. The m4a container is
 // written by mp4-muxer (MIT), loaded on first use.
 
-const MUXER_URL = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.mjs";
+const MUXER_URL = new URL("lib/mp4-muxer@5.2.2/build/mp4-muxer.mjs", import.meta.url).href; // scripts/fetch-libs.sh
 export const AUDIO_RATE = 44100;
 const BITRATE = 96000;
 const FRAMES = 4096; // samples handed to the encoder at a time

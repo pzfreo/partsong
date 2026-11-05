@@ -3,7 +3,8 @@
 // models run on onnxruntime-web, driven from here: segnet on the page's tiles,
 // then the encoder and the decoder loop for each staff the reader asks for.
 
-const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
+// Served from partsong.app itself (scripts/fetch-libs.sh), not a CDN.
+const ORT_URL = new URL("lib/onnxruntime-web@1.30.0/dist/", import.meta.url).href;
 const MODEL_CACHE = "partscanner-models-v1";
 const MODELS = [
   "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx",

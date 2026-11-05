@@ -1,7 +1,7 @@
 // Renders each page of a PDF to a PNG for recognition, via pdf.js (loaded on
 // first use; the service worker caches it for offline use).
 
-const PDFJS_URL = "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/build/";
+const PDFJS_URL = new URL("lib/pdfjs-dist@6.4.299/build/", import.meta.url).href; // scripts/fetch-libs.sh
 const TARGET_WIDTH = 2480; // about 300 dpi across an A4 page
 const MAX_SIDE = 4200; // same cap as photos (see normalise() in app.js)
 

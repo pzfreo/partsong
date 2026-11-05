@@ -57,7 +57,7 @@ function showError(message) {
 window.addEventListener("error", (e) => showError(e.message));
 window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason)));
 window.reportError ??= (e) => showError(e?.message ?? String(e));
-const OSMD_URL = "https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@2.2.0/build/opensheetmusicdisplay.min.js";
+const OSMD_URL = "lib/opensheetmusicdisplay@2.2.0/build/opensheetmusicdisplay.min.js"; // scripts/fetch-libs.sh
 const NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
 const noteName = (m) => NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
 
