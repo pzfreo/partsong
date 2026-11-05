@@ -628,6 +628,7 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
   $("scan-name").value = title;
   renderPages();
   show("scan");
+  checkDevice();
   startWorker();
 }
 
@@ -635,12 +636,73 @@ $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
 
 // Reading on iPhone/iPad is experimental: Safari there is short of memory,
 // so a long score can stop part-way (the read then resumes where it stopped).
-if (iDevice) {
+const IOS_NOTE = (() => {
   const device = /iPhone|iPod/.test(ua) ? "iPhone" : "iPad";
-  $("device-note").textContent =
+  return (
     `Scanning on ${device} is experimental: ${device}s are short of memory for reading music, so a long score may stop and restart part-way. ` +
-    "For long scores, a computer or Android phone using Chrome is more reliable.";
+    "For long scores, a computer or Android phone using Chrome is more reliable."
+  );
+})();
+if (iDevice) {
+  $("device-note").textContent = IOS_NOTE;
   $("device-note").hidden = false;
+}
+
+// A quick check, each time the scan screen opens, that this browser can run
+// the music reader: WebAssembly SIMD, and the memory onnxruntime reserves
+// when it starts (a shared block that can grow to 4 GB; iPhones sometimes
+// refuse it, "RangeError: Out of memory"). Done in a throwaway worker, closed
+// at once so the memory is freed; nothing is downloaded. It warns rather than
+// blocks: free memory changes as apps close. Counted by device and version.
+const PROBE = `
+let r = "ok";
+try {
+  // wasm-feature-detect's SIMD test module
+  if (!WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11]))) r = "no SIMD";
+} catch { r = "no WebAssembly"; }
+if (r === "ok") {
+  try { new WebAssembly.Memory({ initial: 256, maximum: 65536, shared: true }); }
+  catch (e) { r = e instanceof RangeError ? "memory" : "other: " + String(e.message || e).slice(0, 60); }
+}
+postMessage(r);`;
+let probeCounted = false;
+function checkDevice() {
+  let w;
+  try {
+    w = new Worker(URL.createObjectURL(new Blob([PROBE], { type: "text/javascript" })));
+  } catch {
+    return;
+  }
+  const done = (r) => {
+    w.terminate();
+    if (!probeCounted) {
+      probeCounted = true;
+      track(`device-check (${deviceTag}): ${r}`);
+    }
+    const note = $("device-note");
+    if (r === "memory") {
+      const phone = iDevice || deviceKind === "Android";
+      const what = deviceKind === "iPad" ? "iPad" : phone ? "phone" : "computer";
+      note.textContent =
+        `This ${what} couldn't set aside enough memory for the music reader just now, so reading would probably fail. ` +
+        `Close other apps and ${iDevice ? "Safari" : "browser"} tabs${phone ? ` (or restart the ${what})` : ""}, then open Partsong again.` +
+        (phone ? " Or scan on a computer using Chrome or Edge." : "");
+    } else if (r === "no SIMD" || r === "no WebAssembly") {
+      note.textContent = "This browser is too old to read music. Update it (or the phone's software), or scan on a computer using Chrome or Edge.";
+    } else {
+      note.textContent = iDevice ? IOS_NOTE : "";
+    }
+    note.hidden = !note.textContent;
+  };
+  const timer = setTimeout(() => done("no answer"), 3000);
+  w.onmessage = (e) => {
+    clearTimeout(timer);
+    done(e.data);
+  };
+  w.onerror = () => {
+    clearTimeout(timer);
+    done("worker failed");
+  };
 }
 
 // The sample score (samples/tallis-if-ye-love-me.pdf, from CPDL):
