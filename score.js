@@ -267,6 +267,21 @@ function mergeTies(notes) {
 const sameLine = (a, b) =>
   a.length === b.length && a.every((n, i) => n.t === b[i].t && n.midi === b[i].midi && n.dur === b[i].dur);
 
+// Upper and lower lines of a staff that differ in only one bar (not the last)
+// are one voice read with a stray chord: a real divide, like a soprano line
+// splitting for the closing bars, runs over two bars or more.
+function strayChordOnly(a, b, measures) {
+  const key = (n) => `${n.t}|${n.midi}`;
+  const inA = new Set(a.map(key));
+  const inB = new Set(b.map(key));
+  const bars = new Set(
+    [...a.filter((n) => !inB.has(key(n))), ...b.filter((n) => !inA.has(key(n)))].map((n) =>
+      measures.findIndex((m) => n.t >= m.start - 1e-6 && n.t < m.start + m.length - 1e-6),
+    ),
+  );
+  return bars.size === 1 && !bars.has(measures.length - 1) && !bars.has(-1);
+}
+
 // A choir written on two staves (SA, TB) may switch to four staves, one per
 // voice, partway down a page; the reader then gives those staves as four new
 // parts. Fold them back into the choir's empty bars, voice by voice, keeping
@@ -616,7 +631,7 @@ export function buildScore(pages, { legacyAlign = false } = {}) {
       });
       const h = mergeTies(high);
       const l = mergeTies(low);
-      const twoVoices = l.length && !sameLine(h, l);
+      const twoVoices = l.length && !sameLine(h, l) && !strayChordOnly(h, l, measures);
       const staffKey = `${info.key}/${staff}`;
       if (h.length) partLines.push({ staff, staffKey, voice: twoVoices ? "upper" : "only", notes: h });
       if (twoVoices) partLines.push({ staff, staffKey, voice: "lower", notes: l });
