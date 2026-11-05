@@ -46,11 +46,14 @@ await openFromSettings();
 r.desktop = { steps: steps() };
 let downloaded;
 const origClick = HTMLAnchorElement.prototype.click;
-HTMLAnchorElement.prototype.click = function () { if (this.download) downloaded = this.download; else origClick.call(this); };
+// Neither the download nor the mailto: link goes anywhere (a mailto: would open
+// this machine's mail app with a test report to bugs@partsong.app).
+let mailto;
+HTMLAnchorElement.prototype.click = function () { if (this.download) downloaded = this.download; else if (this.href.startsWith("mailto:")) mailto = this.href; else origClick.call(this); };
 $("report-share").click();
-await waitFor(() => downloaded && $("report-share").dataset.href, 30000, "desktop");
+await waitFor(() => downloaded && mailto, 30000, "desktop");
 HTMLAnchorElement.prototype.click = origClick;
-const u = new URL($("report-share").dataset.href);
+const u = new URL(mailto);
 r.desktop.result = { downloaded, to: u.pathname, subject: u.searchParams.get("subject"), status: $("report-status").textContent };
 $("report").dispatchEvent(new MouseEvent("click", { bubbles: true })); await sleep(300);
 r.tapOutsideCloses = $("report").hidden;

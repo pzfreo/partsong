@@ -257,8 +257,8 @@ $("report-share").onclick = async () => {
       let body = reportText();
       if (body.length > 6000) body = body.slice(0, 6000) + "\n…(trimmed)";
       const url = `mailto:${REPORT_TO}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
-      button.dataset.href = url; // what was handed to the mail app (also used by tests)
-      location.href = url;
+      // A link click, like the download above (tests stub it so no mail app opens).
+      Object.assign(document.createElement("a"), { href: url }).click();
       status.textContent = file
         ? `Attach ${file.name} (in your Downloads) to the email, then send.`
         : `If no email opened, write to ${REPORT_TO} and paste the details below.`;
