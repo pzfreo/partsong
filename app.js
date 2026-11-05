@@ -796,11 +796,39 @@ function resumeScan(entry) {
   readScan();
 }
 
+// The reader uses several threads only in a cross-origin isolated page, and
+// on GitHub Pages only the service worker can make one, for pages loaded after
+// it took over: so a first visit would read on one thread. Reload once (the
+// saved scan carries on below), when a reload would make the difference.
+const THREADS_RELOAD = "partsong-threads-reload";
+function reloadForThreads() {
+  try {
+    // Not on iPhones and iPads: Safari closes the tab there when reading runs
+    // short of memory, and more threads wouldn't help with that.
+    if (iDevice || self.crossOriginIsolated || !navigator.serviceWorker?.controller || (navigator.hardwareConcurrency || 1) < 2) return false;
+    if (sessionStorage.getItem(THREADS_RELOAD)) return false; // tried in this tab
+    sessionStorage.setItem(THREADS_RELOAD, "pending");
+  } catch {
+    return false;
+  }
+  location.reload();
+  return true;
+}
+
 // On launch, carry on with a scan that was interrupted, unless it has already
 // been resumed twice without progress (e.g. the phone keeps running out of memory).
 // Counted, by kind of device: the page itself can't report being killed.
 async function resumeUnfinished() {
   const entry = (await db.all().catch(() => [])).find((e) => e.pending && !e.stopped);
+  let reloaded = false;
+  try {
+    reloaded = sessionStorage.getItem(THREADS_RELOAD) === "pending";
+    if (reloaded) sessionStorage.setItem(THREADS_RELOAD, "done");
+  } catch {}
+  if (entry && reloaded) {
+    track(`read-reloaded-for-threads (${deviceTag}): ${self.crossOriginIsolated ? "isolated" : "still not isolated"}`);
+    return resumeScan(entry);
+  }
   const resumes = entry?.resumes ?? 0;
   if (!entry || resumes > 2) return;
   await db.update(entry.id, { resumes: resumes + 1 }).catch(() => {});
@@ -1157,6 +1185,7 @@ async function readScan() {
   scanId ??= crypto.randomUUID();
   scanCreated ??= Date.now();
   let saved = !rereading && (await db.put(scanEntry(true)).then(() => true, () => false));
+  if (saved && reloadForThreads()) return;
   try {
     startWorker();
     await Promise.race([workerReady, stopped]);
