@@ -462,6 +462,9 @@ function startWorker() {
         const was = engineStatus.split(" · ")[0];
         setEngineStatus(`${was ? `${was} · ` : ""}Download failed (${data.why}), retrying (${data.attempt})…${inAppBrowser ? IN_APP_TIP : ""}`);
         remember(readerSetup, `Download retry ${data.attempt}: ${data.why}`, 10);
+      } else if (data.type === "refetch") {
+        remember(readerSetup, `Model piece ${data.name} #${data.piece} missing; downloading it again`, 10);
+        track(`model-refetched (${deviceTag})`);
       } else if (data.type === "ready") {
         setEngineStatus("");
         try {

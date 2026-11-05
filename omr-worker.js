@@ -96,7 +96,10 @@ async function downloadModel(name) {
   }
 }
 
-async function modelBytes(name) {
+// A stored piece can vanish between the download check and here (seen on
+// iPhones, after Safari reloaded the page under memory pressure): fetch the
+// missing pieces again, once, rather than fail the read.
+async function modelBytes(name, again) {
   const cache = await caches.open(MODEL_CACHE);
   const whole = await cache.match(modelUrl(name));
   if (whole) return new Uint8Array(await whole.arrayBuffer());
@@ -104,7 +107,12 @@ async function modelBytes(name) {
   const bytes = new Uint8Array(size);
   for (let i = 0; i * PIECE < size; i++) {
     const piece = await cache.match(pieceKey(name, i));
-    if (!piece) throw new Error(`model piece missing: ${name} #${i}`);
+    if (!piece) {
+      if (again) throw new Error(`model piece missing: ${name} #${i}`);
+      post({ type: "refetch", name, piece: i });
+      await downloadModel(name);
+      return modelBytes(name, true);
+    }
     bytes.set(new Uint8Array(await piece.arrayBuffer()), i * PIECE);
   }
   return bytes;
