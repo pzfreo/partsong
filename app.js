@@ -803,9 +803,9 @@ function resumeScan(entry) {
 const THREADS_RELOAD = "partsong-threads-reload";
 function reloadForThreads() {
   try {
-    // Not on iPhones and iPads: Safari closes the tab there when reading runs
-    // short of memory, and more threads wouldn't help with that.
-    if (iDevice || self.crossOriginIsolated || !navigator.serviceWorker?.controller || (navigator.hardwareConcurrency || 1) < 2) return false;
+    // Computers only: phones close the tab when reading runs short of memory
+    // (more threads use more), and a reload would cut a download short.
+    if (iDevice || deviceKind === "Android" || self.crossOriginIsolated || !navigator.serviceWorker?.controller || (navigator.hardwareConcurrency || 1) < 2) return false;
     if (sessionStorage.getItem(THREADS_RELOAD)) return false; // tried in this tab
     sessionStorage.setItem(THREADS_RELOAD, "pending");
   } catch {
