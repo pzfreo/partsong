@@ -11,7 +11,10 @@ import { join } from "node:path";
 const [url, out, timeoutSec = "900", driveFile, shotPrefix] = process.argv.slice(2);
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const port = +(process.env.CDP_PORT || 9333);
-const chrome = spawn(CHROME, [
+// CDP_HOST: drive a browser already running there (e.g. Edge in a Windows VM,
+// started with --remote-debugging-port) instead of starting Chrome here.
+const host = process.env.CDP_HOST || "127.0.0.1";
+const chrome = process.env.CDP_HOST ? null : spawn(CHROME, [
   "--headless=new",
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${mkdtempSync(join(tmpdir(), "chrome-"))}`,
@@ -26,7 +29,7 @@ let wsUrl;
 for (let i = 0; i < 50 && !wsUrl; i++) {
   await sleep(200);
   try {
-    const tabs = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+    const tabs = await (await fetch(`http://${host}:${port}/json`)).json();
     wsUrl = tabs.find((t) => t.type === "page")?.webSocketDebuggerUrl;
   } catch {}
 }
@@ -77,8 +80,12 @@ ws.onmessage = ({ data }) => {
 };
 await send("Runtime.enable");
 await send("Page.enable");
-await send("Emulation.setDeviceMetricsOverride", { width: 412, height: 915, deviceScaleFactor: 2, mobile: true });
-await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+// DESKTOP=1: a desktop-sized window without touch, as on a computer.
+if (process.env.DESKTOP) await send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 911, deviceScaleFactor: 1, mobile: false });
+else {
+  await send("Emulation.setDeviceMetricsOverride", { width: 412, height: 915, deviceScaleFactor: 2, mobile: true });
+  await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+}
 // CPU_THROTTLE=4 slows the page down to roughly phone speed.
 if (process.env.USER_AGENT) await send("Emulation.setUserAgentOverride", { userAgent: process.env.USER_AGENT });
 if (process.env.CPU_THROTTLE) await send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.CPU_THROTTLE) });
@@ -109,5 +116,5 @@ while (Date.now() < deadline) {
 if (result) writeFileSync(out, result);
 console.log(result ? `DONE in ${((Date.now() - t0) / 1000).toFixed(1)}s -> ${out}` : "TIMEOUT");
 ws.close();
-chrome.kill();
+chrome?.kill();
 process.exit(result ? 0 : 1);
