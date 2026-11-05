@@ -1,6 +1,6 @@
 // Report a problem: one share button with device-specific steps. With a score
 // open it attaches the score file (phone: share sheet; desktop: download +
-// email); from home, text only. Back, ✕ and tapping outside close it.
+// email); from home, text only. Technical details expand. Back, ✕ and tapping outside close it.
 // Run against http://localhost:8765/index.html.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(100); } throw new Error("timeout waiting for " + label); };
@@ -27,6 +27,10 @@ let shared;
 navigator.share = async (d) => { shared = d; };
 await openFromSettings();
 r.onlyOneButton = $("report").querySelectorAll("button").length === 2; // share + ✕
+// Clicking "Technical details included" opens it (and leaves the dialog open).
+$("report").querySelector("summary").click(); await sleep(100);
+r.detailsOpen = $("report").querySelector("details").open && !$("report").hidden;
+$("report").querySelector("details").open = false;
 r.phone = { button: $("report-share").textContent, steps: steps() };
 $("report-text").value = "Altos get the soprano run in bar 20";
 await shot(false);

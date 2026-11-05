@@ -192,7 +192,11 @@ function closeReport(nav = true) {
   if (nav && history.state?.report) history.back();
 }
 $("report-close").onclick = () => closeReport();
-$("report").onclick = (e) => e.target === $("report") && closeReport();
+// A block body: an onclick returning false cancels the click, which stopped
+// "Technical details" opening.
+$("report").onclick = (e) => {
+  if (e.target === $("report")) closeReport();
+};
 
 // About: version, privacy, licence (AGPL: the source link is the offer of
 // source to network users) and third-party credits.
