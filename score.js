@@ -95,6 +95,21 @@ export function parsePage(xmlText) {
       const newSystem = !!measure.querySelector('print[new-system="yes"]');
       return { notes, length: maxPos || timeLength, meter: timeLength, newSystem, ...repeatMarks(measure) };
     });
+    // A pair of staves the reader took for a piano's (braced) can come out as
+    // one staff, both clefs on it; each note still has the outline of the
+    // staff it was read from, so the lower staff's notes go back on staff 2
+    // and each staff can be marked on its own.
+    if (staves === 1) {
+      for (const m of measures) {
+        const boxed = m.notes.filter((n) => n.box);
+        const tops = [...new Set(boxed.map((n) => n.box.y0))].sort((a, b) => a - b);
+        if (tops.length !== 2) continue;
+        const [upper, lower] = tops.map((y0) => boxed.find((n) => n.box.y0 === y0).box);
+        if (upper.y1 > lower.y0) continue; // overlapping: not two staves
+        for (const n of boxed) if (n.box.y0 === lower.y0) n.staff = 2;
+        staves = 2;
+      }
+    }
     for (let staff = 1; staff <= staves; staff++) placeNoteheads(measures, staff);
     return { staves, measures, clef };
   });

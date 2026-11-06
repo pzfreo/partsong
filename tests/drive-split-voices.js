@@ -21,5 +21,10 @@ for (let i = 0; i < 40 && !entry; i++) {
 }
 const rose = buildScore(entry.pages.map(parsePage));
 r.roseSplit = rose.lines.filter((l) => l.voice === "lower").length;
-r.ok = r.pontio.length === 5 && r.roseSplit === 9;
+// 8, not 9: one system's piano staves, read as a single staff, now go back on
+// two staves (by the staff each note was read from) and join the piano part,
+// instead of making an extra part with an upper and lower line.
+r.rosePianoParts = new Set(rose.lines.filter((l) => l.label.startsWith("Piano")).map((l) => l.staffKey.split("/")[0])).size;
+r.roseOddParts = rose.lines.filter((l) => /^Part 1\.6/.test(l.label)).length;
+r.ok = r.pontio.length === 5 && r.roseSplit === 8 && r.rosePianoParts === 2 && r.roseOddParts === 0;
 window.result = r;
