@@ -13,10 +13,12 @@
 //! staffs found").
 
 pub mod layout;
+pub mod staffs;
 
 use homr_rs::braces::MultiStaff;
 use homr_rs::musicxml::{generate_xml_with, XmlOptions};
-use homr_rs::page::{analyse_page, PageMasks};
+use homr_rs::page::PageMasks;
+use staffs::analyse_page;
 use homr_rs::preprocess::{autocrop, bgr_to_gray, clahe, masks, merge_tiles, postprocess, resize_image, tile_input, tile_origins, Bgr, WIN};
 use homr_rs::score::{symbol_center, PageMapping, Row};
 use homr_rs::staff::Staff;
