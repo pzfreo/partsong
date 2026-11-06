@@ -299,7 +299,14 @@ export async function shareLink(link, title) {
       if (e.name === "NotAllowedError") return "retry";
     }
   }
-  await navigator.clipboard.writeText(data.text);
+  try {
+    await navigator.clipboard.writeText(data.text);
+  } catch (e) {
+    // Safari allows copying only straight after a tap: making the link took
+    // too long, so it's ready for the next tap.
+    if (e.name === "NotAllowedError") return "retry";
+    throw e;
+  }
   return "copied";
 }
 
