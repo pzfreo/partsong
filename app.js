@@ -1688,13 +1688,16 @@ let score;
 // system and bar number, so a score saved under an earlier layout has them
 // moved to the system or bar in the same place on its page (layout 2: bars
 // lined up system by system, which can drop a misread extra bar or system).
-const LAYOUT = 2;
+// Layout 3: a pair of staves read as one goes back on two, which can change
+// the parts, so the saved part choices (line ids) move to the same music.
+const LAYOUT = 3;
 function migrateLayout(entry) {
-  if ((entry.layout ?? 1) >= LAYOUT) return;
+  const was = entry.layout ?? 1;
+  if (was >= LAYOUT) return;
   entry.layout = LAYOUT;
   const refs = [entry.manual, entry.markedStaff, entry.repeats].some((o) => o && Object.keys(o).length);
-  if (refs) {
-    const old = buildScore(entry.pages.map(parsePage), { legacyAlign: true });
+  if (was < 2 && refs) {
+    const old = buildScore(entry.pages.map((x) => parsePage(x, { restaff: false })), { legacyAlign: true });
     const sys = placeMap(old.systems, score.systems);
     const bar = placeMap(old.measures, score.measures);
     const move = (o, key, value = (v) => v) => {
@@ -1709,7 +1712,48 @@ function migrateLayout(entry) {
     const barNo = (n) => { const i = bar.get(Number(n) - 1); return i == null ? null : i + 1; };
     entry.repeats = entry.repeats && Object.fromEntries(Object.entries(entry.repeats).map(([k, v]) => [barNo(k), barNo(v) ?? v]).filter(([k]) => k != null));
   }
-  updateEntry(entry.id, { layout: entry.layout, manual: entry.manual, markedStaff: entry.markedStaff, repeats: entry.repeats });
+  moveLines(entry); // after the marks have moved to this layout's systems
+  updateEntry(entry.id, { layout: entry.layout, manual: entry.manual, markedStaff: entry.markedStaff, repeats: entry.repeats, mine: entry.mine, excluded: entry.excluded });
+}
+
+// Saved part choices (your part, parts switched off, marks) are line ids:
+// re-point each at the line now holding most of its notes, and each mark's
+// staff at the staff that line is on in that system, nearest the old one.
+function moveLines(entry) {
+  const used = entry.mine != null || entry.excluded?.length || Object.keys(entry.manual ?? {}).length;
+  if (!used) return;
+  const old = buildScore(entry.pages.map((x) => parsePage(x, { restaff: false })));
+  const sig = (s) => JSON.stringify(s.lines.map((l) => [l.label, l.staffKey, l.voice, l.notes.length]));
+  if (sig(old) === sig(score)) return;
+  const notes = score.lines.map((l) => new Set(l.notes.map((n) => `${n.t}:${n.midi}`)));
+  const line = (id) => {
+    const from = old.lines[id];
+    if (!from) return id;
+    let best = null;
+    let most = 0;
+    notes.forEach((set, j) => {
+      const n = from.notes.filter((x) => set.has(`${x.t}:${x.midi}`)).length;
+      if (n > most || (n === most && n && score.lines[j].label === from.label)) [best, most] = [j, n];
+    });
+    return best ?? id;
+  };
+  if (entry.mine != null) entry.mine = line(entry.mine);
+  if (entry.excluded) entry.excluded = [...new Set(entry.excluded.map(line))];
+  if (!entry.manual) return;
+  const markedStaff = {};
+  entry.manual = Object.fromEntries(
+    Object.entries(entry.manual).map(([sys, id]) => {
+      const to = line(id);
+      const was = old.systems[sys]?.staves.find((st) => st.key === entry.markedStaff?.[sys]) ?? old.systems[sys]?.staves.find((st) => st.lines.includes(id));
+      const mid = was && (was.y0 + was.y1) / 2;
+      const staff = score.systems[sys]?.staves
+        .filter((st) => st.lines.includes(to))
+        .sort((a, b) => (mid == null ? 0 : Math.abs((a.y0 + a.y1) / 2 - mid) - Math.abs((b.y0 + b.y1) / 2 - mid)))[0];
+      if (staff) markedStaff[sys] = staff.key;
+      return [sys, to];
+    }),
+  );
+  entry.markedStaff = markedStaff;
 }
 
 // Index in `to` of the item (system or bar, with page and box) in the same

@@ -37,7 +37,9 @@ function voiceTag(note) {
   return null;
 }
 
-export function parsePage(xmlText) {
+// restaff: false reads it as before the lower staff went back on staff 2
+// (for moving saved choices on; see migrateLayout in app.js).
+export function parsePage(xmlText, { restaff = true } = {}) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) throw new Error("Not valid MusicXML");
   const title = doc.querySelector("work-title, movement-title")?.textContent?.trim() || "";
@@ -96,22 +98,32 @@ export function parsePage(xmlText) {
       return { notes, length: maxPos || timeLength, meter: timeLength, newSystem, ...repeatMarks(measure) };
     });
     // A pair of staves the reader took for a piano's (braced) can come out as
-    // one staff, both clefs on it; each note still has the outline of the
-    // staff it was read from, so the lower staff's notes go back on staff 2
-    // and each staff can be marked on its own.
-    if (staves === 1) {
+    // one staff, both clefs on it (homr keeps the lower staff only if it finds
+    // its clef early on); each note still has the outline of the staff it was
+    // read from. Where two outlines, one above the other, sound together in a
+    // bar (a bar run on over a line break has them one after the other), the
+    // lower one's notes go back on staff 2, in every bar, so each staff can
+    // be marked on its own.
+    let restaffed = false;
+    if (staves === 1 && restaff) {
+      const key = (b) => `${b.x0},${b.y0},${b.x1},${b.y1}`;
+      const lowers = new Set();
       for (const m of measures) {
         const boxed = m.notes.filter((n) => n.box);
-        const tops = [...new Set(boxed.map((n) => n.box.y0))].sort((a, b) => a - b);
-        if (tops.length !== 2) continue;
-        const [upper, lower] = tops.map((y0) => boxed.find((n) => n.box.y0 === y0).box);
-        if (upper.y1 > lower.y0) continue; // overlapping: not two staves
-        for (const n of boxed) if (n.box.y0 === lower.y0) n.staff = 2;
-        staves = 2;
+        const outlines = [...new Map(boxed.map((n) => [key(n.box), n.box])).values()].sort((a, b) => a.y0 - b.y0);
+        if (outlines.length !== 2 || outlines[0].y1 > outlines[1].y0) continue;
+        const span = (b) => {
+          const on = boxed.filter((n) => key(n.box) === key(b));
+          return [Math.min(...on.map((n) => n.start)), Math.max(...on.map((n) => n.start + n.dur))];
+        };
+        const [a, b] = outlines.map(span);
+        if (a[0] < b[1] - 1e-6 && b[0] < a[1] - 1e-6) lowers.add(key(outlines[1]));
       }
+      for (const m of measures) for (const n of m.notes) if (n.box && lowers.has(key(n.box))) n.staff = 2;
+      if (lowers.size) [staves, restaffed] = [2, true];
     }
     for (let staff = 1; staff <= staves; staff++) placeNoteheads(measures, staff);
-    return { staves, measures, clef };
+    return { staves, measures, clef, restaffed };
   });
   return { title, parts };
 }
@@ -302,8 +314,8 @@ function strayChordOnly(a, b, measures) {
 // parts. Fold them back into the choir's empty bars, voice by voice, keeping
 // each voice's own staff for marking.
 function foldSplitChoir(page) {
-  const choir = page.parts.filter((p) => p.staves === 2);
-  const voices = page.parts.filter((p) => p.staves === 1);
+  const choir = page.parts.filter((p) => p.staves === 2 && !p.restaffed);
+  const voices = page.parts.filter((p) => p.staves === 1 || p.restaffed);
   if (choir.length !== 1 || voices.length !== 4) return;
   const sung = (part, i) => part.measures[i]?.notes.some((n) => n.midi != null);
   const bars = Math.max(...page.parts.map((p) => p.measures.length));
@@ -504,9 +516,14 @@ export function buildScore(pages, { legacyAlign = false } = {}) {
   pages.forEach((page, p) => {
     const seen = {};
     page.parts.forEach((part, idx) => {
-      const k = (seen[part.staves] = (seen[part.staves] ?? -1) + 1);
-      part.key = `${part.staves}#${k}`;
+      // A part put back on two staves keeps matching as the one-staff part the
+      // reader wrote (so singers' staves never join a piano part).
+      const written = part.restaffed ? 1 : part.staves;
+      const k = (seen[written] = (seen[written] ?? -1) + 1);
+      part.key = `${written}#${k}`;
       const info = partInfo.get(part.key) ?? { key: part.key, staves: part.staves, order: [], clef: part.clef };
+      info.staves = Math.max(info.staves, part.staves);
+      info.restaffed ||= !!part.restaffed;
       info.order.push(idx / Math.max(1, page.parts.length - 1));
       partInfo.set(part.key, info);
     });
@@ -657,7 +674,7 @@ export function buildScore(pages, { legacyAlign = false } = {}) {
   // accompaniment): name the voices, and mark the piano lines so they don't
   // double the voices by default.
   const singing = built.filter((b) => b.info.staves === 1 && b.partLines.length === 1);
-  const piano = built.filter((b) => b.info.staves > 1);
+  const piano = built.filter((b) => b.info.staves > 1 && !b.info.key.startsWith("1#"));
   if (singing.length >= 2 && piano.length) {
     const names = singing.length === 4 ? ["Soprano", "Alto", "Tenor", "Bass"] : singing.map((_, i) => `Voice ${i + 1}`);
     for (const b of built) {
@@ -815,6 +832,9 @@ function barAreas(systems) {
 }
 
 function labelLines(partLines, info, partCount) {
+  // Put back on two staves: could be singers or a piano, so no voice names
+  // (a misread bit of piano called Soprano would become your part).
+  if (info.restaffed) return partLines.map((l, i) => ({ ...l, label: `Part ${info.key.replace("#", ".")} line ${i + 1}` }));
   if (partLines.length === 4) {
     return partLines.map((l, i) => ({ ...l, label: ["Soprano", "Alto", "Tenor", "Bass"][i], fixedLabel: true }));
   }

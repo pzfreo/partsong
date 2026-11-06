@@ -16,6 +16,7 @@ const port = +(process.env.CDP_PORT || 9333);
 const host = process.env.CDP_HOST || "127.0.0.1";
 const chrome = process.env.CDP_HOST ? null : spawn(CHROME, [
   "--headless=new",
+  "--mute-audio", // tests press Play: never through the speakers
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${mkdtempSync(join(tmpdir(), "chrome-"))}`,
   "--enable-unsafe-webgpu",
