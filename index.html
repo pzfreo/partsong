@@ -67,7 +67,7 @@
       <h2 id="about-heading">Partsong <small id="about-version"></small></h2>
       <p>Scan choral sheet music on your phone and practise your own part, with the other parts quieter.</p>
       <p>Everything runs on your device: the music is read on the phone, and your scores stay on it unless you share them. No account needed.</p>
-      <p>When you share a score, an encrypted copy is uploaded so the link can bring it to the people you send it to. The key is only in the link, so nobody else, Partsong included, can open it. Copies are deleted after a year; for a copy that doesn't expire, use Export PDF in a score's settings.</p>
+      <p>When you share a score, an encrypted copy is uploaded so the link can bring it to the people you send it to. The key is only in the link, so nobody else, Partsong included, can open it. Copies are deleted after a year; for a copy that doesn't expire, use Save as a PDF file in a score's settings.</p>
       <p>To see which features get used, Partsong counts visits and actions (such as reading a score or pressing play), and in broad groups how many days it's been used, anonymously with <a href="https://www.goatcounter.com" target="_blank" rel="noopener">GoatCounter</a>: no cookies, nothing that identifies you, and never your scores or their names.</p>
       <h3>Licence</h3>
       <p>© 2026 Paul Fremantle. Partsong is free software: you can use, study, share and change it under the terms of the
@@ -200,17 +200,7 @@
           <span class="grab" aria-hidden="true"></span>
           <button id="panel-close" class="panel-close">Done</button>
         </div>
-        <h2>Share <button class="q" aria-controls="share-help" aria-expanded="false" aria-label="About sharing">?</button></h2>
-        <p id="share-help" class="hint" hidden>Audio: what Play plays, as set below (turn Other parts to 0 for your part alone). Part with score: a link that brings the score, with your part and settings, into Partsong. Links last a year. Export PDF: the pages as a PDF with the score inside, to keep, print or send; it doesn't expire, and Open PDF brings it back into Partsong.</p>
-        <div class="row2" aria-live="polite">
-          <button id="share-audio">Share audio</button>
-          <button id="share-score">Share part with score</button>
-        </div>
-        <div class="row2">
-          <button id="export-pdf">Export PDF</button>
-        </div>
-
-        <h2>Your part <button class="q" aria-controls="part-help" aria-expanded="false" aria-label="About choosing your part">?</button></h2>
+        <h2>Which part do you sing? <button class="q" aria-controls="part-help" aria-expanded="false" aria-label="About choosing your part">?</button></h2>
         <p id="part-help" class="hint" hidden>Marking works for any score: tap the staff you sing in each system. Picking from the list is quicker if your part stays on the same staff throughout.</p>
         <div id="auto-part">
           <div id="parts-doubt" class="parts-doubt" hidden>
@@ -227,7 +217,7 @@
           </div>
           <div id="parts-list">
             <button id="start-markup">Mark your part on the music</button>
-            <p class="hint">Or pick it:</p>
+            <p class="hint">Or choose from this list:</p>
             <ul id="lines" class="lines"></ul>
           </div>
           <p id="parts-show" class="hint" hidden><button id="show-parts" class="link"></button></p>
@@ -240,6 +230,20 @@
           </div>
         </div>
         <p id="fix-link" class="hint">Parts out of step, or staves grouped wrongly on a page? <button id="start-fix" class="link">Check and fix systems</button></p>
+
+        <h2>Share</h2>
+        <div class="row2 share-item" aria-live="polite">
+          <button id="share-score">Send a link to another singer</button>
+          <p class="hint">Opens this score in Partsong for them, with your part and settings. Works for a year.</p>
+        </div>
+        <div class="row2 share-item" aria-live="polite">
+          <button id="share-audio">Send a recording of my part</button>
+          <p class="hint">What Play plays, as an audio file anyone can play.</p>
+        </div>
+        <div class="row2 share-item" aria-live="polite">
+          <button id="export-pdf">Save as a PDF file</button>
+          <p class="hint">To keep, print or attach to an email. Open PDF brings it back into Partsong.</p>
+        </div>
 
         <div class="controls">
           <label><span>Other parts <output id="others-val"></output></span>

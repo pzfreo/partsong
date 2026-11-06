@@ -26,7 +26,7 @@ const shareAudio = async () => {
   const realShare = navigator.share;
   navigator.share = async () => { throw new DOMException("expired", "NotAllowedError"); };
   $("share-audio").click();
-  const preparing = await waitFor(() => $("share-audio").textContent !== "Share audio" && $("share-audio").textContent, 5000, "preparing");
+  const preparing = await waitFor(() => $("share-audio").textContent !== "Send a recording of my part" && $("share-audio").textContent, 5000, "preparing");
   const ready = await waitFor(() => ($("share-audio").textContent === "Ready to share" || !$("error-toast").hidden) && $("share-audio").textContent, 120000, "ready");
   const ms = Math.round(performance.now() - t0);
   navigator.share = realShare;

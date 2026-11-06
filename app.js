@@ -1257,7 +1257,12 @@ async function readScan() {
     // whole message can run off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
     const why = lines.length > 1 ? `${lines.at(-1)}\n\n${e.message}` : e.message;
-    setPageStatus(`Couldn't read page ${pages.findIndex((p) => !p.xml) + 1}: ${why}`);
+    const page = pages.findIndex((p) => !p.xml) + 1;
+    setPageStatus(
+      NO_MUSIC.test(e.message)
+        ? `Page ${page} doesn't look like sheet music.\nRetake the photo straight on, in good light, or remove it (×) and press Read music again.`
+        : `Couldn't read page ${page}: ${why}`,
+    );
     return;
   } finally {
     reading = false;
@@ -1446,6 +1451,9 @@ $("share").onclick = () => shareScore(current.id, $("share"), $("share-status"))
 // only opens within a few seconds of a tap, and rendering can take longer on a
 // phone; then the file is kept ("Ready to share: tap again") until anything
 // that's heard changes.
+const SHARE_AUDIO = "Send a recording of my part";
+const SHARE_SCORE = "Send a link to another singer";
+const EXPORT_PDF = "Save as a PDF file";
 let preparedAudio = null; // { key, file, part }
 function audioKey() {
   return JSON.stringify([current?.id, playSegments(), current.mine, current.manual, current.excluded, current.octave, othersGain, $("instrument").value, $("tempo").value]);
@@ -1455,13 +1463,13 @@ function updateAudioButton() {
   if (preparedAudio && preparedAudio.key !== audioKey()) {
     preparedAudio = null;
     clearTimeout($("share-audio").revert);
-    $("share-audio").textContent = "Share audio";
+    $("share-audio").textContent = SHARE_AUDIO;
   }
   updateShareReady();
 }
 $("share-audio").onclick = async () => {
   const button = $("share-audio");
-  const say = shareReporter(button, null, "Share audio");
+  const say = shareReporter(button, null, SHARE_AUDIO);
   button.disabled = true;
   try {
     const key = audioKey();
@@ -1490,7 +1498,7 @@ $("share-audio").onclick = async () => {
 };
 
 // The same link share as the icon by the title.
-$("share-score").onclick = () => shareScore(current.id, $("share-score"), null, "Share part with score");
+$("share-score").onclick = () => shareScore(current.id, $("share-score"), null, SHARE_SCORE);
 
 // The score as a .partsong.pdf (pages, with the score inside): a copy to keep,
 // print or send that doesn't expire. Kept while unchanged if the share sheet
@@ -1498,7 +1506,7 @@ $("share-score").onclick = () => shareScore(current.id, $("share-score"), null, 
 let preparedPdf = null; // { key, file }
 $("export-pdf").onclick = async () => {
   const button = $("export-pdf");
-  const say = shareReporter(button, null, "Export PDF");
+  const say = shareReporter(button, null, EXPORT_PDF);
   button.disabled = true;
   try {
     const entry = liveEntry((await db.all()).find((e) => e.id === current.id));
@@ -1747,7 +1755,7 @@ function openScore(entry, nav = "push") {
 
   $("title").value = entry.title;
   $("share-status").textContent = "";
-  for (const [id, label] of [["share-audio", "Share audio"], ["share-score", "Share part with score"], ["export-pdf", "Export PDF"]]) {
+  for (const [id, label] of [["share-audio", SHARE_AUDIO], ["share-score", SHARE_SCORE], ["export-pdf", EXPORT_PDF]]) {
     clearTimeout($(id).revert);
     $(id).textContent = label;
   }

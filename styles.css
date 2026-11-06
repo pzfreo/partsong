@@ -369,6 +369,8 @@ header a.icon-btn { color: inherit; text-decoration: none; display: inline-flex;
 .hint { font-size: 0.85rem; margin: 2px 0 8px; color: var(--muted); }
 .row2 { display: flex; gap: 10px; margin: 2px auto 4px; } /* auto: centred in the panel like the rest */
 .row2 button { flex: 1; padding: 10px 8px; }
+.share-item { flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.share-item .hint { margin: 0; }
 /* Ready to share at once (no preparing): filled, with a tick. */
 .row2 button.ready { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .row2 button.ready::before { content: "✓\00a0"; }
