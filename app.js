@@ -1060,8 +1060,8 @@ async function checkSystems(stopped) {
     for (const i of todo) {
       // Progress is on the status line until the check opens, then on its bar.
       pageLabel = check ? "" : `Page ${i + 1} of ${pages.length}`;
-      if (!check) setPageStatus("finding systems…");
-      check?.waiting(`Finding systems: page ${i + 1} of ${pages.length}…`);
+      if (!check) setPageStatus("finding lines of music…");
+      check?.waiting(`Finding the lines of music (systems): page ${i + 1} of ${pages.length}…`);
       try {
         const r = await Promise.race([layoutPage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
         pages[i].layout = r.systems;
@@ -1104,20 +1104,20 @@ async function checkSystems(stopped) {
 // marks the unusual ones, lets Read music be tapped, and resolves with the
 // systems of the pages changed (page -> [top, bottom] ranges).
 $("check-stop").onclick = () => $("recognise").click();
-const CHECK_LINES = "Red lines mark systems; tap between staves to change.";
-const CHECK_INTRO = `Pages appear as their systems are found: check each while the rest are found. ${CHECK_LINES}`;
+const CHECK_LINES = "Each red line marks where one line of music (system) ends: all the voices sung together. If a red line is in the wrong place, tap between two staves to add or remove one.";
+const CHECK_INTRO = `Pages appear as they're found. ${CHECK_LINES}`;
 function openCheck() {
   const drafts = {};
   const labels = {};
   $("check-list").replaceChildren();
   $("check-intro").textContent = CHECK_INTRO;
-  // Stop reading moves into the bar at the bottom (the one above scrolls
-  // away), and becomes Read music once every page's systems are found.
+  // Stop reading moves into the bar at the bottom as Cancel (the button above
+  // scrolls away), and becomes Next once every page's systems are found.
   $("check-done").hidden = true;
   $("check-done").onclick = null;
   $("check-stop").hidden = false;
   $("recognise").hidden = true;
-  $("check-wait").textContent = "Finding systems…";
+  $("check-wait").textContent = "Finding the lines of music (systems)…";
   $("systems-check").hidden = false;
   $("systems-check").scrollIntoView({ behavior: "smooth", block: "start" });
   return {
@@ -1160,7 +1160,7 @@ function openCheck() {
       const which = doubtful.map((i) => i + 1);
       const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
       $("check-intro").textContent = CHECK_LINES + (which.length ? ` ${named} unusual.` : "");
-      $("check-wait").textContent = "Systems look OK? Next:";
+      $("check-wait").textContent = "Red lines look right?";
       $("check-stop").hidden = true;
       $("check-done").hidden = false;
       return new Promise((resolve) => {
@@ -1998,7 +1998,7 @@ function renderPartChoice() {
   $("auto-part").hidden = marked > 0;
   $("marked-part").hidden = marked === 0;
   $("marked-count").textContent = `${marked} of ${score.systems.length} systems`;
-  $("tap-hint").textContent = fixing ? "Red lines are where Partsong thinks one system ends and the next begins. Tap between two staves to add or remove a line." : marking ? "Tap the staff you sing in each system." : "Tap a bar to start from there.";
+  $("tap-hint").textContent = fixing ? "Red lines are where Partsong thinks one line of music (system) ends and the next begins. Tap between two staves to add or remove a line." : marking ? "Tap the staff you sing in each system." : "Tap a bar to start from there.";
 }
 
 // The sound is a preference for this device, not part of a score.

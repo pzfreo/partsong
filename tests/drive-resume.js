@@ -25,7 +25,7 @@ a.$("gallery").files = dt.files; a.$("gallery").dispatchEvent(new a.w.Event("cha
 await waitFor(() => !a.$("recognise").disabled, 20000, "pages added");
 a.$("scan-name").value = "Interrupted";
 a.$("recognise").click();
-await waitFor(() => /Page 3 of 4: (?!finding systems)/.test(a.$("status").textContent), 300000, "page 3 started");
+await waitFor(() => /Page 3 of 4: (?!finding lines of music)/.test(a.$("status").textContent), 300000, "page 3 started");
 r.wakeLockRequested = wakeCalls;
 a.f.remove(); // the tab is killed mid-read
 await sleep(500);

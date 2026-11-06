@@ -191,6 +191,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .markup-bar { flex-wrap: wrap; gap: 8px 12px; }
 .markup-bar p { flex: 1 1 100%; margin: 0; font-size: 0.92rem; }
 .markup-bar button { flex: 1; }
+.markup-bar button.link { flex: 0 0 auto; }
 /* The current-bar highlight would look like part of the marking. */
 body.marking .photo-list .bar { display: none; }
 body.marking .transport { display: none; }
