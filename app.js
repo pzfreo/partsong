@@ -623,6 +623,7 @@ let readSeconds = null; // how long the last whole read took
 let rereading = false; // reading a saved score's photos again: keep the old music until done
 
 let scanSettings = {}; // settings to save with the scan (the sample's)
+let scanResumes = 0; // launches that carried this scan on without progress (kept by readScan's save)
 
 function loadScan(images = [], xmls = [], id = null, created = null, title = "") {
   pages.forEach((p) => URL.revokeObjectURL(p.url));
@@ -630,6 +631,7 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
   scanId = id;
   scanCreated = created;
   scanSettings = {};
+  scanResumes = 0;
   rereading = false;
   pageStatus = "";
   $("scan-name").value = title;
@@ -793,6 +795,7 @@ function resumeScan(entry) {
   // Settings made before reading (the sample's repeats, systems you fixed) go on with it.
   const { id: _id, created: _c, title: _t, images: _i, pages: _p, pending: _pe, stopped: _s, resumes: _r, ...settings } = entry;
   scanSettings = settings;
+  scanResumes = entry.resumes ?? 0;
   readScan();
 }
 
@@ -807,7 +810,7 @@ function reloadForThreads() {
     // (more threads use more), and a reload would cut a download short.
     if (iDevice || deviceKind === "Android" || self.crossOriginIsolated || !navigator.serviceWorker?.controller || (navigator.hardwareConcurrency || 1) < 2) return false;
     if (sessionStorage.getItem(THREADS_RELOAD)) return false; // tried in this tab
-    sessionStorage.setItem(THREADS_RELOAD, "pending");
+    sessionStorage.setItem(THREADS_RELOAD, `scan:${scanId}`);
   } catch {
     return false;
   }
@@ -818,23 +821,33 @@ function reloadForThreads() {
 // On launch, carry on with a scan that was interrupted, unless it has already
 // been resumed twice without progress (e.g. the phone keeps running out of memory).
 // Counted, by kind of device: the page itself can't report being killed.
-async function resumeUnfinished() {
-  const entry = (await db.all().catch(() => [])).find((e) => e.pending && !e.stopped);
-  let reloaded = false;
+// Taken at startup, whichever way the launch goes, so a later reload in this
+// tab (e.g. Update) doesn't take it for this one.
+const reloadedScan = (() => {
   try {
-    reloaded = sessionStorage.getItem(THREADS_RELOAD) === "pending";
-    if (reloaded) sessionStorage.setItem(THREADS_RELOAD, "done");
-  } catch {}
-  if (entry && reloaded) {
-    track(`read-reloaded-for-threads (${deviceTag}): ${self.crossOriginIsolated ? "isolated" : "still not isolated"}`);
-    return resumeScan(entry);
+    const v = sessionStorage.getItem(THREADS_RELOAD);
+    if (!v?.startsWith("scan:")) return null;
+    sessionStorage.setItem(THREADS_RELOAD, "done");
+    return v.slice(5);
+  } catch {
+    return null;
   }
+})();
+async function resumeUnfinished() {
+  const all = await db.all().catch(() => []);
+  // After the reload for threads: the scan that was tapped, not counted as a restart.
+  const tapped = reloadedScan && all.find((e) => e.id === reloadedScan && e.pending);
+  if (tapped) {
+    track(`read-reloaded-for-threads (${deviceTag}): ${self.crossOriginIsolated ? "isolated" : "still not isolated"}`);
+    return resumeScan(tapped);
+  }
+  const entry = all.find((e) => e.pending && !e.stopped);
   const resumes = entry?.resumes ?? 0;
   if (!entry || resumes > 2) return;
   await db.update(entry.id, { resumes: resumes + 1 }).catch(() => {});
   if (resumes === 2) return track(`read-gave-up (${deviceTag})`); // once
   track(`read-restarted (${deviceTag})`);
-  resumeScan(entry);
+  resumeScan({ ...entry, resumes: resumes + 1 }); // as just saved: readScan's save keeps it
 }
 
 function scanEntry(pending) {
@@ -845,6 +858,7 @@ function scanEntry(pending) {
     images: pages.map((p) => p.blob),
     pages: pages.map((p) => p.xml ?? null),
     pending,
+    resumes: scanResumes,
     ...scanSettings,
   };
 }
@@ -1218,6 +1232,7 @@ async function readScan() {
         renderPages();
         i--;
       }
+      scanResumes = 0; // progress
       if (saved) await db.update(scanId, { images: pages.map((p) => p.blob), pages: pages.map((p) => p.xml ?? null), resumes: 0 }).catch(() => {});
     }
     pageLabel = "";

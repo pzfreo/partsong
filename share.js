@@ -303,8 +303,9 @@ export async function shareLink(link, title) {
     await navigator.clipboard.writeText(data.text);
   } catch (e) {
     // Safari allows copying only straight after a tap: making the link took
-    // too long, so it's ready for the next tap.
-    if (e.name === "NotAllowedError") return "retry";
+    // too long, so it's ready for the next tap. Refused right after a tap
+    // (copying blocked), it's an error, or "tap again" would never end.
+    if (e.name === "NotAllowedError" && navigator.userActivation?.isActive === false) return "retry";
     throw e;
   }
   return "copied";

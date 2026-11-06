@@ -80,8 +80,13 @@ ws.onmessage = ({ data }) => {
 };
 await send("Runtime.enable");
 await send("Page.enable");
-// DESKTOP=1: a desktop-sized window without touch, as on a computer.
-if (process.env.DESKTOP) await send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 911, deviceScaleFactor: 1, mobile: false });
+// DESKTOP=1: a desktop-sized window without touch, as on a computer. Read
+// music there reloads the page once for threads, which would end the drive
+// script: mark it done (tests/threads-reload.mjs tests the reload itself).
+if (process.env.DESKTOP) {
+  await send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 911, deviceScaleFactor: 1, mobile: false });
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `try { sessionStorage.setItem("partsong-threads-reload", "done"); } catch {}` });
+}
 else {
   await send("Emulation.setDeviceMetricsOverride", { width: 412, height: 915, deviceScaleFactor: 2, mobile: true });
   await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });

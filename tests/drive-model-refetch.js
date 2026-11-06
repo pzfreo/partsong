@@ -20,4 +20,6 @@ r.read = !$("practice").hidden;
 r.bars = $("to-bar").value;
 r.storedAgain = (await Promise.all(keys.map((k) => cache.match(k)))).some(Boolean);
 r.events = events.filter((e) => /refetch|read-/.test(e));
+// The read must have gone through the refetch (a fresh reader would just download it).
+r.ok = r.read && r.storedAgain && r.events.some((e) => e.startsWith("model-refetched"));
 window.result = r;
