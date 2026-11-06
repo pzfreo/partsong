@@ -643,15 +643,9 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
 
 $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
 
-// Reading on iPhone/iPad is experimental: Safari there is short of memory,
+// Reading on iPhone/iPad is less reliable: Safari there is short of memory,
 // so a long score can stop part-way (the read then resumes where it stopped).
-const IOS_NOTE = (() => {
-  const device = /iPhone|iPod/.test(ua) ? "iPhone" : "iPad";
-  return (
-    `Scanning on ${device} is experimental: ${device}s are short of memory for reading music, so a long score may stop and restart part-way. ` +
-    "For long scores, a computer or Android phone using Chrome is more reliable."
-  );
-})();
+const IOS_NOTE = `If reading music doesn't work on this ${/iPhone|iPod/.test(ua) ? "iPhone" : "iPad"}, Partsong also works on a computer.`;
 if (iDevice) {
   $("device-note").textContent = IOS_NOTE;
   $("device-note").hidden = false;
