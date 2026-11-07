@@ -99,21 +99,31 @@ async function downloadModel(name) {
 // A stored piece can vanish between the download check and here (seen on
 // iPhones, after Safari reloaded the page under memory pressure): fetch the
 // missing pieces again, once, rather than fail the read.
-async function modelBytes(name, again) {
+// into(size): where to put the bytes (default a new array), e.g. straight
+// into the reader's memory, so a phone doesn't hold a second copy.
+async function modelBytes(name, again, into = (n) => new Uint8Array(n)) {
   const cache = await caches.open(MODEL_CACHE);
   const whole = await cache.match(modelUrl(name));
-  if (whole) return new Uint8Array(await whole.arrayBuffer());
+  if (whole) {
+    const got = new Uint8Array(await whole.arrayBuffer());
+    const bytes = into(got.byteLength);
+    if (bytes.byteLength !== got.byteLength) throw new Error(`model ${name} has the wrong size`);
+    bytes.set(got);
+    return bytes;
+  }
   const size = MODEL_SIZES[name];
-  const bytes = new Uint8Array(size);
+  let bytes;
   for (let i = 0; i * PIECE < size; i++) {
     const piece = await cache.match(pieceKey(name, i));
     if (!piece) {
       if (again) throw new Error(`model piece missing: ${name} #${i}`);
       post({ type: "refetch", name, piece: i });
       await downloadModel(name);
-      return modelBytes(name, true);
+      return modelBytes(name, true, into);
     }
-    bytes.set(new Uint8Array(await piece.arrayBuffer()), i * PIECE);
+    const got = new Uint8Array(await piece.arrayBuffer());
+    bytes ??= into(size);
+    bytes.set(got, i * PIECE);
   }
   return bytes;
 }
@@ -333,22 +343,20 @@ async function rustDecoder() {
   if (decoderInstance) return decoderInstance;
   const t0 = performance.now();
   const { rs, build } = await decoderModule();
-  const bytes = await modelBytes(MODELS[2]);
-  const p = rs.decoder_alloc(bytes.byteLength);
-  new Uint8Array(rs.memory.buffer, p, bytes.byteLength).set(bytes);
-  const model = rs.decoder_load(p, bytes.byteLength);
-  rs.decoder_free(p, bytes.byteLength);
+  let p, n;
+  await modelBytes(MODELS[2], false, (size) => ((p = rs.decoder_alloc((n = size))), new Uint8Array(rs.memory.buffer, p, n)));
+  const model = rs.decoder_load(p, n);
+  rs.decoder_free(p, n);
   if (!model) throw new Error("the music reader couldn't load homr's decoder");
   const contextBytes = CONTEXT_POSITIONS * DECODER_DIM * 4;
   decoderInstance = { rs, model, context: rs.decoder_alloc(contextBytes), out: rs.decoder_alloc(MAX_SEQ_LEN * 32) };
   post({ type: "log", msg: `Loaded ${MODELS[2]} in homr-rs (${build}) in ${Math.round(performance.now() - t0)} ms` });
   if (exactEncoder) {
     const t1 = performance.now();
-    const eb = await modelBytes(MODELS[1]);
-    const ep = rs.decoder_alloc(eb.byteLength);
-    new Uint8Array(rs.memory.buffer, ep, eb.byteLength).set(eb);
-    decoderInstance.encoder = rs.encoder_load(ep, eb.byteLength);
-    rs.decoder_free(ep, eb.byteLength);
+    let ep, en;
+    await modelBytes(MODELS[1], false, (size) => ((ep = rs.decoder_alloc((en = size))), new Uint8Array(rs.memory.buffer, ep, en)));
+    decoderInstance.encoder = rs.encoder_load(ep, en);
+    rs.decoder_free(ep, en);
     if (!decoderInstance.encoder) throw new Error("the music reader couldn't load homr's encoder");
     decoderInstance.image = rs.decoder_alloc(IMAGE_VALUES * 4);
     post({ type: "log", msg: `Loaded ${MODELS[1]} in homr-rs (${build}, exact) in ${Math.round(performance.now() - t1)} ms` });
@@ -527,10 +535,14 @@ async function layout(imageBytes, systemsJson) {
 }
 
 async function recognise(imageBytes, systemsJson, packed) {
-  const { rs, mem, copyIn, message } = await openPage(imageBytes, systemsJson, packed);
-
+  // The models first, then the page: loading them makes short-lived copies,
+  // and with the page's picture open as well that was the read's peak
+  // (iPhone simulator, sample: 1.23 GB for a moment, now 0.99 GB; 0.79 GB
+  // while reading).
   const decoder = await rustDecoder();
   const encoder = exactEncoder ? null : await session(MODELS[1]);
+  const { rs, mem, copyIn, message } = await openPage(imageBytes, systemsJson, packed);
+
   let staff = 0;
   for (;;) {
     const state = rs.page_step();
