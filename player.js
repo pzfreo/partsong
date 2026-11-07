@@ -212,12 +212,14 @@ export class Player {
     out.connect(env).connect(this.master);
     osc.start(when);
     osc.stop(end + 0.3);
-    this.active ??= [];
-    this.active.push(...sources);
+    // The list these notes join: render() swaps this.active back afterwards,
+    // and Firefox fires a rendering's onended after that.
+    const active = (this.active ??= []);
+    active.push(...sources);
     osc.onended = () => {
       for (const s of sources) {
-        const i = this.active.indexOf(s);
-        if (i >= 0) this.active.splice(i, 1);
+        const i = active.indexOf(s);
+        if (i >= 0) active.splice(i, 1);
       }
     };
   }
