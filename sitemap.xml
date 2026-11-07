@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://partsong.app/</loc></url>
+  <url><loc>https://partsong.app/learn-your-choir-part.html</loc></url>
+  <url><loc>https://partsong.app/rehearsal-tracks.html</loc></url>
+  <url><loc>https://partsong.app/choir-directors.html</loc></url>
+  <url><loc>https://partsong.app/cpdl.html</loc></url>
+  <url><loc>https://partsong.app/faq.html</loc></url>
   <url><loc>https://partsong.app/privacy.html</loc></url>
   <url><loc>https://partsong.app/terms.html</loc></url>
 </urlset>

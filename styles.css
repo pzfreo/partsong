@@ -322,6 +322,8 @@ input[type="radio"], input[type="checkbox"] { width: 20px; height: 20px; accent-
 .legal h4 { font-size: 0.98rem; margin: 18px 0 4px; }
 .legal p, .legal li { font-size: 0.95rem; }
 .legal a { color: var(--accent); }
+.legal a.button { text-decoration: none; }
+.legal a.button.primary { color: var(--accent-text); }
 .legal-links { margin-top: 32px; }
 .report-link a { color: var(--accent); }
 header a.icon-btn { color: inherit; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
