@@ -35,10 +35,22 @@ const shareAudio = async () => {
   const before = preparing, after = ready, label = $("share-audio").textContent; // "Shared ✓" just after
   $("panel-close").click(); await sleep(200);
   if (!shared) return { error: $("error-toast").textContent };
-  const buf = await new AudioContext().decodeAudioData(await shared.file.arrayBuffer());
+  const bytes = new Uint8Array(await shared.file.arrayBuffer());
+  // The m4a's AAC config (DecoderSpecificInfo, tag 5) inside its esds box:
+  // 12 08 is AAC-LC, 44.1 kHz, mono. Players other than Chrome's own read
+  // this, so a wrong one (Safari's encoder once gave a whole descriptor) makes
+  // a file Google Drive and others refuse.
+  let asc = null;
+  for (let i = 0; i + 4 < bytes.length; i++) if (bytes[i] === 0x65 && bytes[i + 1] === 0x73 && bytes[i + 2] === 0x64 && bytes[i + 3] === 0x73) {
+    const box = bytes.subarray(i, i + 64), at = box.indexOf(5, 12);
+    let j = at + 1, n = 0; while (box[j] & 0x80) n = (n << 7) | (box[j++] & 0x7f); n = (n << 7) | box[j++];
+    asc = [...box.subarray(j, j + n)].map((x) => x.toString(16).padStart(2, "0")).join(" ");
+    break;
+  }
+  const buf = await new AudioContext().decodeAudioData(bytes.buffer);
   const d = buf.getChannelData(0);
   let sq = 0; for (const v of d) sq += v * v;
-  return { label, statuses: [before, after, label], name: shared.file.name, type: shared.file.type, kb: Math.round(shared.file.size / 1024), seconds: +buf.duration.toFixed(1), rms: +Math.sqrt(sq / d.length).toFixed(4), title: shared.title, ms };
+  return { label, statuses: [before, after, label], name: shared.file.name, asc, type: shared.file.type, kb: Math.round(shared.file.size / 1024), seconds: +buf.duration.toFixed(1), rms: +Math.sqrt(sq / d.length).toFixed(4), title: shared.title, ms };
 };
 const r = {};
 const bars = Number($("to-bar").value);

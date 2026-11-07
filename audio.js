@@ -23,12 +23,24 @@ async function aacSupported(sampleRate) {
   return !!supported;
 }
 
+// The AAC-LC AudioSpecificConfig for the m4a header, made here rather than taken
+// from the encoder: Safari hands over a whole MPEG-4 ES descriptor, which the
+// muxer wraps again, so players read 0 channels and refuse the file.
+const AAC_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+function aacConfig(sampleRate, channels) {
+  const rate = AAC_RATES.indexOf(sampleRate);
+  if (rate < 0) throw new Error(`no AAC rate index for ${sampleRate}`);
+  return new Uint8Array([(2 << 3) | (rate >> 1), ((rate & 1) << 7) | (channels << 3)]);
+}
+
 async function m4a(samples, sampleRate) {
   const { Muxer, ArrayBufferTarget } = await import(MUXER_URL);
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({ target, audio: { codec: "aac", numberOfChannels: 1, sampleRate }, fastStart: "in-memory" });
   let failed = null;
-  const encoder = new AudioEncoder({ output: (chunk, meta) => muxer.addAudioChunk(chunk, meta), error: (e) => (failed = e) });
+  const description = aacConfig(sampleRate, 1);
+  const output = (chunk, meta) => muxer.addAudioChunk(chunk, meta?.decoderConfig ? { ...meta, decoderConfig: { ...meta.decoderConfig, description } } : meta);
+  const encoder = new AudioEncoder({ output, error: (e) => (failed = e) });
   encoder.configure({ codec: "mp4a.40.2", sampleRate, numberOfChannels: 1, bitrate: BITRATE });
   for (let i = 0; i < samples.length; i += FRAMES) {
     const data = samples.subarray(i, i + FRAMES);
