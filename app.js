@@ -787,8 +787,14 @@ function resumeScan(entry) {
   if (reading) return show("scan");
   loadScan(entry.images, entry.pages, entry.id, entry.created, entry.title);
   // Settings made before reading (the sample's repeats, systems you fixed) go on with it.
-  const { id: _id, created: _c, title: _t, images: _i, pages: _p, pending: _pe, stopped: _s, resumes: _r, ...settings } = entry;
+  const { id: _id, created: _c, title: _t, images: _i, pages: _p, pending: _pe, stopped: _s, resumes: _r, found, ...settings } = entry;
   scanSettings = settings;
+  found?.forEach((f, i) => {
+    if (!f || !pages[i]) return;
+    pages[i].layout = f.systems;
+    pages[i].parts = f.parts;
+    pages[i].classes = f.classes;
+  });
   scanResumes = entry.resumes ?? 0;
   readScan();
 }
@@ -844,6 +850,12 @@ async function resumeUnfinished() {
   resumeScan({ ...entry, resumes: resumes + 1 }); // as just saved: readScan's save keeps it
 }
 
+// Each page's systems and segmentation as found, kept with an unfinished
+// scan so that a read carried on after the app was closed starts where it
+// stopped (finding systems for a long score takes a while, and a phone may
+// close the app more than once on the way).
+const foundLayouts = () => pages.map((p) => (p.layout ? { systems: p.layout, parts: p.parts, classes: p.classes ?? null } : null));
+
 function scanEntry(pending) {
   return {
     id: scanId,
@@ -854,6 +866,7 @@ function scanEntry(pending) {
     pending,
     resumes: scanResumes,
     ...scanSettings,
+    ...(pending ? { found: foundLayouts() } : {}),
   };
 }
 
@@ -1056,14 +1069,20 @@ async function checkSystems(stopped) {
       pageLabel = check ? "" : `Page ${i + 1} of ${pages.length}`;
       if (!check) setPageStatus("finding lines of music…");
       check?.waiting(`Finding the lines of music (systems): page ${i + 1} of ${pages.length}…`);
-      try {
-        const r = await Promise.race([layoutPage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
-        pages[i].layout = r.systems;
-        pages[i].parts = r.parts;
-        pages[i].classes = r.classes;
-      } catch (e) {
-        // No music on it: the reading leaves it out.
-        if (e instanceof Stopped || !NO_MUSIC.test(e.message)) throw e;
+      // A page whose systems were found before the app was closed (a phone
+      // reloading under memory pressure) isn't done again.
+      if (!pages[i].layout) {
+        try {
+          const r = await Promise.race([layoutPage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
+          pages[i].layout = r.systems;
+          pages[i].parts = r.parts;
+          pages[i].classes = r.classes;
+          if (scanId && !rereading) await db.update(scanId, { found: foundLayouts(), resumes: 0 }).catch(() => {});
+          scanResumes = 0; // progress
+        } catch (e) {
+          // No music on it: the reading leaves it out.
+          if (e instanceof Stopped || !NO_MUSIC.test(e.message)) throw e;
+        }
       }
       if (pages[i].layout) {
         if (!check) {
@@ -1227,7 +1246,7 @@ async function readScan() {
         i--;
       }
       scanResumes = 0; // progress
-      if (saved) await db.update(scanId, { images: pages.map((p) => p.blob), pages: pages.map((p) => p.xml ?? null), resumes: 0 }).catch(() => {});
+      if (saved) await db.update(scanId, { images: pages.map((p) => p.blob), pages: pages.map((p) => p.xml ?? null), found: foundLayouts(), resumes: 0 }).catch(() => {});
     }
     pageLabel = "";
     const secs = Math.round((performance.now() - t0) / 1000);
