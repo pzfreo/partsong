@@ -119,7 +119,9 @@ async function modelBytes(name, again, into = (n) => new Uint8Array(n)) {
       if (again) throw new Error(`model piece missing: ${name} #${i}`);
       post({ type: "refetch", name, piece: i });
       await downloadModel(name);
-      return modelBytes(name, true, into);
+      // The space already given (if any) is used again, not given twice.
+      const given = bytes;
+      return modelBytes(name, true, (n) => given ?? into(n));
     }
     const got = new Uint8Array(await piece.arrayBuffer());
     bytes ??= into(size);
