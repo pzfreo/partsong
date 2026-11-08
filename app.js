@@ -765,6 +765,20 @@ async function countReturn() {
   } catch {}
 }
 
+// Each new score read (not the sample, not a reading again) counted with how
+// many this device has read and on which of its days of use, to see whether
+// people come back to read another: "read-ok: score 2, day 2–3". The tally
+// starts with this count, so scores read before it aren't in it.
+const READS = "partsong-reads";
+function countRead() {
+  try {
+    const n = +(localStorage.getItem(READS) || 0) + 1;
+    localStorage.setItem(READS, n);
+    const days = JSON.parse(localStorage.getItem(USE_DAYS) || "null")?.days ?? 1;
+    track(`read-ok: score ${group(n, [2, 3, 4, 6, 11], 1)}, day ${group(days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
+  } catch {}
+}
+
 // Why a reading failed, short enough to count: the error's last line,
 // without file paths, and with
 // numbers as N so the same failure counts together. Never the score or photo.
@@ -785,7 +799,7 @@ async function trySample() {
   loadScan();
   $("scan-name").value = "If ye love me (sample)";
   // The reader misses the forward repeat at the start of bar 14.
-  scanSettings = { repeats: { 26: 14 } };
+  scanSettings = { repeats: { 26: 14 }, sample: true };
   setPageStatus("Opening the sample…");
   try {
     const blob = await (await fetch("samples/tallis-if-ye-love-me.pdf")).blob();
@@ -1268,6 +1282,7 @@ async function readScan() {
     setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${pages.length} page${pages.length === 1 ? "" : "s"}`);
     track(`read-ok (${deviceTag})`);
+    if (!rereading && !scanSettings.sample) countRead();
   } catch (e) {
     pageLabel = "";
     if (e instanceof Stopped) {
@@ -1334,7 +1349,8 @@ async function openFiles(files) {
     for (const f of files) {
       const shared = await readScoreFile(f);
       if (shared) {
-        await importScore(shared);
+        track("receive: file");
+        await importScore(shared, true);
         continue;
       }
       if (await isPdf(f)) {
@@ -1375,8 +1391,15 @@ async function asNewScore(entry) {
   return entry;
 }
 
-async function importScore(entry) {
+// A score shared to this device is marked, so that its first play is counted:
+// do people who are sent a score get as far as hearing it?
+async function importScore(entry, received = false) {
+  if (received) {
+    entry.received = true;
+    entry.receivedPlayed = false;
+  }
   await db.put(await asNewScore(entry));
+  if (received) track("receive-added");
   openScore(entry);
 }
 
@@ -1579,6 +1602,7 @@ async function copyScore(id) {
 // decrypted, then offered like any other. If the relay can't supply it, say
 // what to do: try again, or ask for it again (a link lasts a year).
 async function receiveFromRelay() {
+  track("receive: link");
   const fragment = location.hash.slice(1);
   history.replaceState(null, "", location.pathname);
   $("library-status").textContent = "Fetching the shared score…";
@@ -1590,7 +1614,8 @@ async function receiveFromRelay() {
   }
   $("library-status").textContent = "";
   if (entry) offerImport(entry);
-  else
+  else track(`receive-failed (${deviceTag}): ${failure.includes("404") ? "link expired" : "couldn't fetch"}`);
+  if (!entry)
     showNotice(
       failure.includes("404")
         ? "This link has expired (links last a year). Ask for the score to be shared again."
@@ -1604,6 +1629,7 @@ async function receiveFromRelay() {
 // (an installed app opened from the link has no way back to that page). Older
 // files sent only #receive. Always asks first, since any page could try this.
 async function receiveFromPage() {
+  track("receive: old file");
   const hash = location.hash;
   history.replaceState(null, "", location.pathname);
   let entry = null;
@@ -1618,9 +1644,11 @@ async function receiveFromPage() {
     if (!entry && payload) entry = await entryFromLink(payload);
     if (!entry) throw new Error("the score didn't arrive");
   } catch (e) {
+    track(`receive-failed (${deviceTag}): old file`);
     showError(`Couldn't open the shared score: ${e.message}`);
   }
   if (entry?.photosLeftOut) {
+    track(`receive-failed (${deviceTag}): old file without photos`);
     // Only the music came through the link (the installed app can't reach the
     // file's page): don't add a copy without its photos.
     showNotice(
@@ -1666,10 +1694,11 @@ async function offerImport(entry, done = () => {}) {
   $("import-yes").onclick = async () => {
     $("import-offer").hidden = true;
     if ((await done()) === false) return;
-    await importScore(entry);
+    await importScore(entry, true);
   };
   $("import-no").onclick = () => {
     $("import-offer").hidden = true;
+    track("receive-cancelled");
     done();
   };
 }
@@ -1690,6 +1719,7 @@ async function openInbox() {
     const f = new File([await res.blob()], name, { type: res.headers.get("content-type") || "" });
     const shared = await readScoreFile(f).catch(() => null);
     if (shared) {
+      track("receive: file");
       await offerImport(shared, () => cache.delete(req));
       continue;
     }
@@ -2603,6 +2633,11 @@ $("play").onclick = () => {
   setPlaying(true);
   if (!playTracked) track("play", hasMarks() ? "play (marked)" : "play");
   playTracked = true;
+  if (current.received && !current.receivedPlayed) {
+    current.receivedPlayed = true;
+    db.update(current.id, { receivedPlayed: true }).catch(() => {});
+    track(`play-received (${deviceKind})`);
+  }
 };
 
 $("rewind").onclick = () => {
@@ -2869,8 +2904,10 @@ window.launchQueue?.setConsumer(async ({ files: handles }) => {
   for (const handle of handles ?? []) {
     const f = await handle.getFile();
     const shared = await readScoreFile(f).catch(() => null);
-    if (shared) await offerImport(shared);
-    else scans.push(f);
+    if (shared) {
+      track("receive: file");
+      await offerImport(shared);
+    } else scans.push(f);
   }
   if (scans.length) {
     loadScan();
