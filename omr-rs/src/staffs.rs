@@ -13,7 +13,7 @@ pub fn analyse_page(m: &PageMasks) -> Result<Vec<MultiStaff>, String> {
     let contours: Vec<Vec<[i32; 2]>> = s.fragments.iter().map(|f| f.contour.clone()).collect();
     let clefs: Vec<RBox> = s.clefs_keys.iter().map(|c| c.to_rbox(NO_FRAGMENT)).collect();
     let bars: Vec<RBox> = s.bar_lines.iter().map(|c| c.to_rbox(NO_FRAGMENT)).collect();
-    let staffs = detect_staff(m.staff, m.h, m.w, &Fragments { boxes: &boxes, contours: &contours }, &clefs, &bars)?;
+    let staffs = detect_staff(m.staff, Some(m.symbols), m.h, m.w, &Fragments { boxes: &boxes, contours: &contours }, &clefs, &bars)?;
     if staffs.is_empty() {
         return Err("No staffs found".into());
     }

@@ -80,6 +80,6 @@ try {
     return out;
   });
 } catch (e) {
-  r.error = String(e);
+  r.error = String(e) + " | status: " + ($("status")?.textContent || "") + " | toast: " + (document.querySelector(".toast, #toast")?.textContent || "");
 }
 window.result = r;

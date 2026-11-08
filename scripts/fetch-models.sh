@@ -6,8 +6,8 @@ set -euo pipefail
 BASE_URL=https://github.com/liebharc/homr/releases/download/onnx_checkpoints
 MODELS=(
   segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f
-  encoder_pytorch_model_465-597144cab54c8f6d0f6c9619df5c5312694eadd6
-  decoder_pytorch_model_465-597144cab54c8f6d0f6c9619df5c5312694eadd6
+  encoder_pytorch_model_509-2293bba14bfea47d9d28411339362af15fce4c31
+  decoder_pytorch_model_509-2293bba14bfea47d9d28411339362af15fce4c31
 )
 
 cd "$(dirname "$0")/.."

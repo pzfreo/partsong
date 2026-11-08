@@ -8,12 +8,12 @@ const ORT_URL = new URL("lib/onnxruntime-web@1.30.0/dist/", import.meta.url).hre
 const MODEL_CACHE = "partscanner-models-v1";
 const MODELS = [
   "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx",
-  "encoder_pytorch_model_465-597144cab54c8f6d0f6c9619df5c5312694eadd6.onnx",
-  "decoder_pytorch_model_465-597144cab54c8f6d0f6c9619df5c5312694eadd6.onnx",
+  "encoder_pytorch_model_509-2293bba14bfea47d9d28411339362af15fce4c31.onnx",
+  "decoder_pytorch_model_509-2293bba14bfea47d9d28411339362af15fce4c31.onnx",
 ];
 // Uncompressed total, for progress: servers may gzip, so content-length
 // doesn't match the bytes received.
-const MODELS_TOTAL_BYTES = 157482318;
+const MODELS_TOTAL_BYTES = 157528486;
 // The big convolutional models gain from the GPU; the decoder runs in homr-rs.
 const GPU_MODELS = new Set([MODELS[0], MODELS[1]]);
 
@@ -35,7 +35,7 @@ const STALL_MS = 30000;
 const MODEL_SIZES = {
   [MODELS[0]]: 57311361,
   [MODELS[1]]: 52861122,
-  [MODELS[2]]: 47309835,
+  [MODELS[2]]: 47356003,
 };
 const modelUrl = (name) => new URL("models/" + name, location.href).href;
 const pieceKey = (name, i) => `${modelUrl(name)}?piece=${i}`;
