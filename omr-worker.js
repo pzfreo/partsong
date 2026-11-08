@@ -96,6 +96,19 @@ async function downloadModel(name) {
   }
 }
 
+// Models from earlier versions (e.g. the 465 pair, about 100 MB) would stay in
+// Cache Storage for good, and phones are short of quota: remove what MODELS
+// doesn't name once the current ones are stored. Best effort.
+async function dropOldModels() {
+  try {
+    const cache = await caches.open(MODEL_CACHE);
+    const current = MODELS.map((name) => modelUrl(name));
+    for (const req of await cache.keys()) {
+      if (!current.some((u) => req.url === u || req.url.startsWith(u + "?"))) await cache.delete(req);
+    }
+  } catch {}
+}
+
 // A stored piece can vanish between the download check and here (seen on
 // iPhones, after Safari reloaded the page under memory pressure): fetch the
 // missing pieces again, once, rather than fail the read.
@@ -587,6 +600,7 @@ async function init(noGpu, exact) {
   for (const name of MODELS) {
     await downloadModel(name);
   }
+  await dropOldModels();
   post({ type: "ready", gpu: useGpu });
 }
 

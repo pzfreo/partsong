@@ -20,4 +20,17 @@ for m in "${MODELS[@]}"; do
     rm "models/$m.zip"
   fi
 done
+
+# The worker (omr-worker.js) hard-codes each model's byte size and the total:
+# a wrong one fails every download on a device, so check them against the files.
+sizes=$(grep -oE 'MODELS\[[0-9]\]\]: [0-9]+' omr-worker.js | grep -oE '[0-9]+$')
+total=$(grep -oE 'MODELS_TOTAL_BYTES = [0-9]+' omr-worker.js | grep -oE '[0-9]+$')
+i=0; sum=0
+for m in "${MODELS[@]}"; do
+  want=$(echo "$sizes" | sed -n "$((i + 1))p"); have=$(wc -c < "models/$m.onnx" | tr -d ' ')
+  [ "$want" = "$have" ] || { echo "omr-worker.js says $m is $want bytes; the file is $have" >&2; exit 1; }
+  sum=$((sum + have)); i=$((i + 1))
+done
+[ "$sum" = "$total" ] || { echo "omr-worker.js MODELS_TOTAL_BYTES is $total; the models add up to $sum" >&2; exit 1; }
+
 ls -la models

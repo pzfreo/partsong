@@ -14,7 +14,7 @@ pub struct Row {
 }
 
 pub fn sorted_row(mut staffs: Vec<(Staff, bool)>) -> Row {
-    staffs.sort_by(|a, b| a.0.min_y.partial_cmp(&b.0.min_y).unwrap());
+    staffs.sort_by(|a, b| a.0.min_y.total_cmp(&b.0.min_y));
     Row { staffs }
 }
 
@@ -41,8 +41,7 @@ pub fn ensure_same_number_of_staffs(rows: Vec<Row>) -> Vec<Row> {
         a.staffs[0]
             .0
             .min_y
-            .partial_cmp(&b.staffs[0].0.min_y)
-            .unwrap()
+            .total_cmp(&b.staffs[0].0.min_y)
     });
     out
 }
@@ -112,7 +111,7 @@ fn split_false_grand_staffs(rows: Vec<Row>, reader: &mut dyn Reader) -> Result<V
 fn user_systems(rows: Vec<Row>, ranges: &[(f64, f64)], reader: &dyn Reader) -> Vec<Row> {
     let middle = |s: &Staff| reader.to_input(((s.min_x + s.max_x) / 2.0, (s.min_y + s.max_y) / 2.0)).1;
     let mut widths: Vec<f64> = rows.iter().flat_map(|r| r.staffs.iter().map(|s| s.0.max_x - s.0.min_x)).collect();
-    widths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    widths.sort_by(|a, b| a.total_cmp(b));
     let width = widths[widths.len() / 2];
     let mut chosen: Vec<Vec<(Staff, bool)>> = vec![vec![]; ranges.len()];
     let mut rest = Vec::new();
@@ -134,7 +133,7 @@ fn user_systems(rows: Vec<Row>, ranges: &[(f64, f64)], reader: &dyn Reader) -> V
     }
     let mut systems: Vec<Row> = chosen.into_iter().filter(|c| !c.is_empty()).map(sorted_row).collect();
     systems.extend(rest);
-    systems.sort_by(|a, b| a.staffs[0].0.min_y.partial_cmp(&b.staffs[0].0.min_y).unwrap());
+    systems.sort_by(|a, b| a.staffs[0].0.min_y.total_cmp(&b.staffs[0].0.min_y));
     systems
 }
 
