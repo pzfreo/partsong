@@ -32,6 +32,24 @@ try {
   await db.remove("reopen-test");
   r.gone = !(await db.all()).some((e) => e.id === "reopen-test");
   r.fails = fails;
+  // A failed request rejects with its error, not null (duplicate key here).
+  await db.put({ id: "dup-test", title: "Dup", images: [] });
+  const realPut = IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put = function (v) { IDBObjectStore.prototype.put = realPut; return this.add(v); };
+  r.requestError = await db.put({ id: "dup-test", title: "Dup", images: [] }).then(() => "none", (e) => (e === null ? "null" : e?.name));
+  await db.remove("dup-test");
+  // Two calls failing together reopen once, and both succeed.
+  const realOpen = indexedDB.open.bind(indexedDB);
+  let opens = 0;
+  indexedDB.open = (...a) => (opens++, realOpen(...a));
+  let left = 2;
+  IDBDatabase.prototype.transaction = function (...a) {
+    if (--left === 0) IDBDatabase.prototype.transaction = real;
+    throw new DOMException("closing", "InvalidStateError");
+  };
+  const both = await Promise.all([db.all(), db.all()]);
+  r.together = { opens, ok: both.every(Array.isArray) };
+  indexedDB.open = realOpen;
   // Other errors still surface.
   IDBDatabase.prototype.transaction = () => { throw new DOMException("no", "NotFoundError"); };
   r.otherError = await db.all().then(() => "none", (e) => e.name);
@@ -39,5 +57,5 @@ try {
 } catch (e) {
   r.error = String(e);
 }
-r.ok = r.title === "Reopened" && r.image === "x" && r.gone && r.fails === 4 && r.otherError === "NotFoundError";
+r.ok = r.title === "Reopened" && r.image === "x" && r.gone && r.fails === 4 && r.otherError === "NotFoundError" && r.requestError === "ConstraintError" && r.together?.opens === 1 && r.together.ok;
 window.result = r;
