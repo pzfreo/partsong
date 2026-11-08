@@ -205,7 +205,8 @@ The service worker is skipped on `localhost`; use `http://127.0.0.1:8765` to
 exercise it. A phone needs HTTPS (camera, caches), so test there via the deployed
 site.
 
-Headless browser tests (put score images/MusicXML in the gitignored `testdata/`;
+Headless browser tests (put score images/MusicXML in the gitignored `testdata/`,
+a clone of the private repo pzfreo/partsong-testdata, so commit and push new test files there;
 screenshots taken with a bare name such as `shot` go to the gitignored `shots/`,
 never `testdata/`, so they aren't mistaken for scores;
 the orientation tests also need simulated camera photos `cam_<page>_exif<tag>.jpg`:
