@@ -42,11 +42,17 @@ struct Pending {
     boxes: [[f64; 4]; 2], // upper, lower: where the staff is on the input image
 }
 
+/// The widest staff, as a share of the photo's width, below which a page is
+/// taken to have no music on it (see Page::segment).
+const MIN_STAFF_WIDTH: f64 = 0.15;
+
 pub struct Page {
     gray: Gray,
     origins: Vec<(i64, i64)>,
     crop: (usize, usize),
     cropped: (usize, usize),
+    /// the photo's width, for MIN_STAFF_WIDTH
+    width: usize,
     mapping: Option<PageMapping>,
     multi: Vec<MultiStaff>,
     user_ranges: Vec<(f64, f64)>,
@@ -105,6 +111,7 @@ impl Page {
         Page {
             cropped: (cropped.h, cropped.w),
             crop,
+            width: bgr.w,
             gray,
             origins,
             mapping: None,
@@ -136,6 +143,21 @@ impl Page {
         let pm = PageMasks { h, w, notehead: &m.notehead, symbols: &m.symbols, staff: &m.staff, clefs_keys: &m.clefs_keys, stem_rests: &m.stems_rest };
         // homr's repair_systems, as homr runs it straight after finding the staffs.
         self.multi = homr_rs::systems::repair_systems(analyse_page(&pm)?)?;
+        // A screenshot with small pictures of pages in it (Partsong's own page
+        // list) has "staves" a few percent of its width, which homr reads as a
+        // bar or two of invented notes. On a photo or PDF of music the staves
+        // cross most of the page (over 80% on every scan we have; a page shot
+        // from a distance is still far above this).
+        let widest = self
+            .multi
+            .iter()
+            .flat_map(|m| m.staffs.iter())
+            .map(|st| self.to_input((st.max_x, st.min_y)).0 - self.to_input((st.min_x, st.min_y)).0)
+            .fold(0.0, f64::max);
+        if widest < MIN_STAFF_WIDTH * self.width as f64 {
+            self.multi.clear();
+            return Err("No staffs found".into());
+        }
         Ok(())
     }
 
