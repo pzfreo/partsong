@@ -921,7 +921,10 @@ function keepAwake() {
 }
 
 async function addPage(image) {
-  const blob = await uprightPhoto(image);
+  // Our own copy: iOS can stop letting Safari read a picked photo later (e.g.
+  // after the app was in the background), and an upright photo is kept as is.
+  const copy = new Blob([await image.arrayBuffer()], { type: image.type });
+  const blob = await uprightPhoto(copy);
   pages.push({ blob, url: URL.createObjectURL(blob) });
   renderPages();
 }
@@ -972,7 +975,12 @@ $("gallery").onchange = (e) => {
 };
 
 async function rotatePage(p) {
-  p.blob = await rotateBlob(p.blob, 90);
+  try {
+    p.blob = await rotateBlob(p.blob, 90);
+  } catch {
+    setPageStatus(`Couldn't turn page ${pages.indexOf(p) + 1}: ${LOST_PICTURE}.`);
+    return;
+  }
   delete p.xml;
   URL.revokeObjectURL(p.url);
   p.url = URL.createObjectURL(p.blob);
@@ -1036,11 +1044,12 @@ async function normalise(blob) {
 
 // A saved page whose picture the phone has lost can't be read again: say
 // what to do rather than show the browser's error.
+const LOST_PICTURE = "the phone has lost the picture of this page. Tap Discard this scan, then add the pages or PDF again";
 async function pagePixels(blob) {
   try {
     return await normalise(blob);
   } catch {
-    throw new Error("the phone has lost the picture of this page. Tap Discard this scan, then add the pages or PDF again");
+    throw new Error(LOST_PICTURE);
   }
 }
 
