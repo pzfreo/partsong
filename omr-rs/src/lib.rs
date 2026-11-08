@@ -141,8 +141,9 @@ impl Page {
         let m = postprocess(masks(&merged, h, w), &mut self.gray);
         self.mapping = Some(PageMapping { cropped: self.cropped, preprocessed: (h, w), crop: (self.crop.0 as f64, self.crop.1 as f64) });
         let pm = PageMasks { h, w, notehead: &m.notehead, symbols: &m.symbols, staff: &m.staff, clefs_keys: &m.clefs_keys, stem_rests: &m.stems_rest };
-        // homr's repair_systems, as homr runs it straight after finding the staffs.
-        self.multi = homr_rs::systems::repair_systems(analyse_page(&pm)?)?;
+        // Not homr's repair_systems: Partsong's own layout rules group the
+        // systems (repair_systems split Of a Rose's pages 2, 4, 8 and 10 wrongly).
+        self.multi = analyse_page(&pm)?;
         // A screenshot with small pictures of pages in it (Partsong's own page
         // list) has "staves" a few percent of its width, which homr reads as a
         // bar or two of invented notes. On a photo or PDF of music the staves
