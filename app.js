@@ -1969,7 +1969,7 @@ function showBar(beat) {
 function keepInView(el) {
   const r = el.getBoundingClientRect();
   const top = document.querySelector("header").offsetHeight;
-  const bottom = $("panel").hidden
+  const bottom = $("panel").hidden || window.matchMedia("(min-width: 1000px)").matches
     ? window.innerHeight - document.querySelector(".transport").offsetHeight
     : $("panel").getBoundingClientRect().top;
   if (r.top >= top && r.bottom <= bottom) return;
@@ -2557,6 +2557,7 @@ $("panel-backdrop").onclick = () => setPanel(false);
   let startY = null;
   const head = $("panel-head");
   head.addEventListener("pointerdown", (e) => {
+    if (window.matchMedia("(min-width: 1000px)").matches) return;
     if (e.target.closest("button")) return;
     startY = e.clientY;
     try {
