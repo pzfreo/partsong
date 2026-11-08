@@ -2,10 +2,49 @@
 //! (formerly omr/runner.py, which patched homr in Pyodide). Each function
 //! names the runner.py function it replaces.
 
-use homr_rs::score::{ensure_same_number_of_staffs, find_periodic_core, sorted_row, Row};
 use homr_rs::staff::Staff;
+use homr_rs::systems::find_periodic_core;
 use homr_rs::staff_image::Regions;
 use homr_rs::tokens::{remove_duplicated_symbols, Symbol, EMPTY, NONOTE};
+
+/// The staves of one system, top to bottom, each with whether it is half of a grand staff.
+#[derive(Clone)]
+pub struct Row {
+    pub staffs: Vec<(Staff, bool)>,
+}
+
+pub fn sorted_row(mut staffs: Vec<(Staff, bool)>) -> Row {
+    staffs.sort_by(|a, b| a.0.min_y.total_cmp(&b.0.min_y));
+    Row { staffs }
+}
+
+/// _ensure_same_number_of_staffs
+pub fn ensure_same_number_of_staffs(rows: Vec<Row>) -> Vec<Row> {
+    let lens: std::collections::BTreeSet<usize> = rows.iter().map(|r| r.staffs.len()).collect();
+    if lens.len() == 1 && *lens.iter().next().unwrap() > 1 {
+        return rows;
+    }
+    let flat: Vec<(Staff, bool)> = rows.iter().flat_map(|r| r.staffs.clone()).collect();
+    let layout: Vec<bool> = flat.iter().map(|s| s.1).collect();
+    if let Some((period, front, back)) = find_periodic_core(&layout) {
+        let core = &flat[front..flat.len() - back];
+        return core
+            .chunks(period)
+            .map(|c| sorted_row(c.to_vec()))
+            .collect();
+    }
+    let mut out: Vec<Row> = rows
+        .into_iter()
+        .flat_map(|r| r.staffs.into_iter().map(|s| Row { staffs: vec![s] }))
+        .collect();
+    out.sort_by(|a, b| {
+        a.staffs[0]
+            .0
+            .min_y
+            .total_cmp(&b.staffs[0].0.min_y)
+    });
+    out
+}
 
 /// Reads one staff: its symbols, or why it can't yet (see lib.rs).
 pub trait Reader {
@@ -72,7 +111,7 @@ fn split_false_grand_staffs(rows: Vec<Row>, reader: &mut dyn Reader) -> Result<V
 fn user_systems(rows: Vec<Row>, ranges: &[(f64, f64)], reader: &dyn Reader) -> Vec<Row> {
     let middle = |s: &Staff| reader.to_input(((s.min_x + s.max_x) / 2.0, (s.min_y + s.max_y) / 2.0)).1;
     let mut widths: Vec<f64> = rows.iter().flat_map(|r| r.staffs.iter().map(|s| s.0.max_x - s.0.min_x)).collect();
-    widths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    widths.sort_by(|a, b| a.total_cmp(b));
     let width = widths[widths.len() / 2];
     let mut chosen: Vec<Vec<(Staff, bool)>> = vec![vec![]; ranges.len()];
     let mut rest = Vec::new();
@@ -94,7 +133,7 @@ fn user_systems(rows: Vec<Row>, ranges: &[(f64, f64)], reader: &dyn Reader) -> V
     }
     let mut systems: Vec<Row> = chosen.into_iter().filter(|c| !c.is_empty()).map(sorted_row).collect();
     systems.extend(rest);
-    systems.sort_by(|a, b| a.staffs[0].0.min_y.partial_cmp(&b.staffs[0].0.min_y).unwrap());
+    systems.sort_by(|a, b| a.staffs[0].0.min_y.total_cmp(&b.staffs[0].0.min_y));
     systems
 }
 

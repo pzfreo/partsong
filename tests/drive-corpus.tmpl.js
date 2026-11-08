@@ -80,6 +80,6 @@ try {
     return out;
   });
 } catch (e) {
-  r.error = String(e);
+  r.error = String(e) + " | status: " + ($("status")?.textContent || "");
 }
 window.result = r;

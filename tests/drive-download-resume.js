@@ -15,5 +15,5 @@ r.piecesKeptAfterKill = await pieces();
 f = frame();
 await waitFor(() => f.contentWindow.result?.xml, 300000, "recognised after resume");
 r.resumedAndRecognised = true;
-r.piecesTotal = await pieces(); // 15 + 13 + 12 = 40 for the three models
+r.piecesTotal = await pieces(); // 14 + 13 + 12 = 39 for the three models
 window.result = r;

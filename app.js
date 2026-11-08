@@ -1137,7 +1137,8 @@ async function checkSystems(stopped) {
     $("recognise").hidden = false;
   }
   scanSettings.systemsChecked = true;
-  if (scanId) await db.update(scanId, { systemHints: scanSettings.systemHints, systemsChecked: true }).catch(() => {});
+  // Reading again: the saved score stays as it was until the new reading is saved.
+  if (scanId && !rereading) await db.update(scanId, { systemHints: scanSettings.systemHints, systemsChecked: true }).catch(() => {});
 }
 
 // The check screen: pages are added as their systems are found; done()
@@ -1246,8 +1247,9 @@ async function readScan() {
     const t0 = performance.now();
     // Only a read of every page gives the time a whole score takes.
     const fresh = pages.every((p) => !p.xml);
-    // Systems you've just fixed are read as they are.
-    if (!rereading && !scanSettings.systemsChecked) await checkSystems(stopped);
+    // Systems you've just fixed are read as they are; Read again shows them
+    // to check (the reader may group them differently now).
+    if (!scanSettings.systemsChecked) await checkSystems(stopped);
     $("read-step").hidden = false;
     for (let i = 0; i < pages.length; i++) {
       if (pages[i].xml) continue;
@@ -2303,7 +2305,7 @@ $("fix-done").onclick = () => {
   const { id, created, title, images, pages: xmls, pending: _pending, excluded: _excluded, ...settings } = liveEntry(current);
   prepared = preparedAudio = null;
   loadScan(images, xmls.map((x, i) => (changed.includes(i) ? null : x)), id, created, title);
-  scanSettings = { ...settings, systemHints: hints };
+  scanSettings = { ...settings, systemHints: hints, systemsChecked: true };
   rereading = true;
   readScan();
 };
@@ -2671,7 +2673,8 @@ $("read-again").onclick = () => {
   const { id, created, title, images, pages: _pages, pending: _pending, excluded: _excluded, ...settings } = liveEntry(current);
   prepared = preparedAudio = null;
   loadScan(images, [], id, created, title);
-  scanSettings = settings;
+  // Its systems are shown to check again, with any you fixed before.
+  scanSettings = { ...settings, systemsChecked: false };
   rereading = true;
   readScan();
 };

@@ -1,6 +1,7 @@
 // "Read again" on a score re-reads its saved photos into the same score,
 // keeping its title and settings; the old music stays saved until the new
-// reading is done. Run against http://localhost:8765/index.html.
+// reading is done. Its systems are shown to check first, as on a first read
+// (the reader may group them differently now). Run against http://localhost:8765/index.html.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(300); } throw new Error("timeout waiting for " + label); };
 const $ = (id) => document.getElementById(id);
@@ -15,6 +16,8 @@ $("title").value = "Renamed"; $("title").dispatchEvent(new Event("change"));
 $("tempo").value = 120; $("tempo").dispatchEvent(new Event("change"));
 await sleep(500);
 const [before] = await db.all();
+let checkShown = false;
+const watch = setInterval(() => { if (!$("systems-check").hidden) checkShown = true; }, 100);
 $("read-again").click();
 await waitFor(() => !$("scan").hidden, 5000, "scan screen");
 r.during = { name: $("scan-name").value, pages: document.querySelectorAll("#pages img").length };
@@ -22,6 +25,8 @@ const mid = await db.all();
 r.midSaved = mid.length === 1 && mid[0].pages.every(Boolean) && !mid[0].pending;
 await shot(false);
 await waitFor(() => !$("practice").hidden, 900000, "read again");
+clearInterval(watch);
+r.checkShown = checkShown;
 await sleep(500);
 const after = await db.all();
 r.after = { count: after.length, sameId: after[0].id === before.id, title: after[0].title, tempo: after[0].tempo, pending: after[0].pending, pages: after[0].pages.filter(Boolean).length, shownTitle: $("title").value, shownTempo: $("tempo").value };
