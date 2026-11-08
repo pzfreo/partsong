@@ -6,3 +6,4 @@ __pycache__/
 undefined-*.png
 .wrangler/
 lib/
+shots/
