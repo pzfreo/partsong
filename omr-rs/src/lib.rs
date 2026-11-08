@@ -134,7 +134,8 @@ impl Page {
         let m = postprocess(masks(&merged, h, w), &mut self.gray);
         self.mapping = Some(PageMapping { cropped: self.cropped, preprocessed: (h, w), crop: (self.crop.0 as f64, self.crop.1 as f64) });
         let pm = PageMasks { h, w, notehead: &m.notehead, symbols: &m.symbols, staff: &m.staff, clefs_keys: &m.clefs_keys, stem_rests: &m.stems_rest };
-        self.multi = analyse_page(&pm)?;
+        // homr's repair_systems, as homr runs it straight after finding the staffs.
+        self.multi = homr_rs::systems::repair_systems(analyse_page(&pm)?)?;
         Ok(())
     }
 
