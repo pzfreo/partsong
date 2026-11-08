@@ -214,6 +214,19 @@ function splitStaff(notes) {
     const second = notes.filter((n) => n.tag.endsWith("2"));
     const first = notes.filter((n) => !n.tag.endsWith("2"));
     if (!second.length && !notes.some((n) => n.staffKey)) return { high: pickFromChords(first, true), low: pickFromChords(first, false) };
+    // A shared unison can lose one voice tag (e.g. "es" before a doubled
+    // "et"). Recover it only when both voices continue at the same pitch,
+    // and the missing voice has neither a note nor an explicit rest there.
+    const missingUnisons = (source, target) => source.filter((n) =>
+      n.midi != null &&
+      target.some((next) => next.midi === n.midi && Math.abs(next.start - n.start - n.dur) < 1e-6) &&
+      source.some((next) => next.midi === n.midi && Math.abs(next.start - n.start - n.dur) < 1e-6) &&
+      !target.some((other) => other.start < n.start + n.dur - 1e-6 && other.start + other.dur > n.start + 1e-6),
+    );
+    const addFirst = missingUnisons(second, first);
+    const addSecond = missingUnisons(first, second);
+    first.push(...addFirst);
+    second.push(...addSecond);
     return { high: pickFromChords(first, true), low: pickFromChords(second, false) };
   }
   return splitByPitch(notes);
