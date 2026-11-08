@@ -7,11 +7,26 @@ const MAX_SIDE = 4200; // same cap as photos (see normalise() in app.js)
 
 let pdfjs;
 
+// A dropped connection (a phone moving from Wi-Fi to 4G) fails the import:
+// try again a couple of times, on a new URL (the browser remembers a failed
+// module), and if it still fails let the next PDF try afresh rather than
+// fail until the page is reloaded.
 function load() {
-  pdfjs ??= import(PDFJS_URL + "pdf.min.mjs").then((lib) => {
-    lib.GlobalWorkerOptions.workerSrc = PDFJS_URL + "pdf.worker.min.mjs";
-    return lib;
-  });
+  pdfjs ??= (async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const lib = await import(PDFJS_URL + "pdf.min.mjs" + (attempt ? `?retry=${Date.now()}` : ""));
+        lib.GlobalWorkerOptions.workerSrc = PDFJS_URL + "pdf.worker.min.mjs";
+        return lib;
+      } catch (e) {
+        if (attempt >= 2) {
+          pdfjs = null;
+          throw e;
+        }
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+  })();
   return pdfjs;
 }
 
