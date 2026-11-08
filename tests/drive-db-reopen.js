@@ -1,24 +1,28 @@
 // iPhone Safari closes a backgrounded page's IndexedDB connection, and the next
 // save threw "The database connection is closing". db.js should reopen and
 // retry once. The closed connection is stood in for by a transaction() that
-// throws Safari's InvalidStateError.
+// throws Safari's InvalidStateError, and Safari's restarted storage process by
+// one that throws UnknownError ("internal error ... Indexed Database server").
 //   node scripts/headless-test.mjs http://localhost:8765/index.html out.json 60 tests/drive-db-reopen.js
 const db = await import("/db.js");
 const real = IDBDatabase.prototype.transaction;
 let fails = 0;
-const closeOnce = () => {
+const failOnce = (message, name) => () => {
   IDBDatabase.prototype.transaction = function (...a) {
     IDBDatabase.prototype.transaction = real;
     fails++;
-    throw new DOMException("Failed to execute 'transaction' on 'IDBDatabase': The database connection is closing.", "InvalidStateError");
+    throw new DOMException(message, name);
   };
 };
+const closeOnce = failOnce("Failed to execute 'transaction' on 'IDBDatabase': The database connection is closing.", "InvalidStateError");
+// Safari after its IndexedDB process restarted.
+const internalOnce = failOnce("An internal error was encountered in the Indexed Database server", "UnknownError");
 const r = {};
 try {
   await db.all();
   closeOnce();
   await db.put({ id: "reopen-test", title: "Reopen", images: [new Blob(["x"], { type: "text/plain" })] });
-  closeOnce();
+  internalOnce();
   await db.update("reopen-test", { title: "Reopened" });
   closeOnce();
   const got = (await db.all()).find((e) => e.id === "reopen-test");

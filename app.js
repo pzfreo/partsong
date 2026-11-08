@@ -54,7 +54,12 @@ function showError(message) {
   clearTimeout(showError.timer);
   showError.timer = setTimeout(() => (el.hidden = true), 8000);
 }
-window.addEventListener("error", (e) => showError(e.message));
+// Only errors from Partsong's own code: a browser extension's script in the
+// page reports through here too (seen: "reading 'M_ID'" on Windows).
+window.addEventListener("error", (e) => {
+  if (e.filename && !e.filename.startsWith(location.origin)) return;
+  showError(e.message);
+});
 window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason)));
 window.reportError ??= (e) => showError(e?.message ?? String(e));
 const OSMD_URL = "lib/opensheetmusicdisplay@2.2.0/build/opensheetmusicdisplay.min.js"; // scripts/fetch-libs.sh

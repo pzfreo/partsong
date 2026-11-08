@@ -44,12 +44,15 @@ function transact(db, mode, fn) {
 }
 
 // A connection closed without a close event ("The database connection is
-// closing", iPhone Safari) throws InvalidStateError: reopen and try once more.
+// closing", iPhone Safari) throws InvalidStateError, and one whose storage
+// process Safari has restarted fails with UnknownError ("An internal error was
+// encountered in the Indexed Database server"): reopen and try once more.
+const REOPEN = new Set(["InvalidStateError", "UnknownError"]);
 async function run(mode, fn) {
   try {
     return await transact(await open(), mode, fn);
   } catch (e) {
-    if (e?.name !== "InvalidStateError") throw e;
+    if (!REOPEN.has(e?.name)) throw e;
     dbPromise = undefined;
     return transact(await open(), mode, fn);
   }
