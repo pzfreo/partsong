@@ -55,9 +55,17 @@ function showError(message) {
   showError.timer = setTimeout(() => (el.hidden = true), 8000);
 }
 // Only errors from Partsong's own code: a browser extension's script in the
-// page reports through here too (seen: "reading 'M_ID'" on Windows).
+// page reports through here too (seen: "reading 'M_ID'" on Windows), and a
+// script from another site reports only "Script error.", with no file.
+const originOf = (url) => {
+  try {
+    return new URL(url).origin; // blob:https://partsong.app/… gives the page's
+  } catch {
+    return "";
+  }
+};
 window.addEventListener("error", (e) => {
-  if (e.filename && !e.filename.startsWith(location.origin)) return;
+  if (e.message === "Script error." || (e.filename && originOf(e.filename) !== location.origin)) return;
   showError(e.message);
 });
 window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason)));
