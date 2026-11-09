@@ -1,6 +1,7 @@
 // Share a score to a file and open it again. Seeds Huron (photos, a mark,
 // settings) from testdata. Run against http://localhost:8765/index.html.
-// These test the PDF share; with no relay reachable, sharing falls back to it.
+// These test the PDF share: with no relay reachable, a share offers it
+// (Send as a PDF instead).
 localStorage.setItem("partsong.relay", "http://localhost:9");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(200); } throw new Error("timeout waiting for " + label); };
@@ -20,8 +21,10 @@ const setPhone = (on) => Object.defineProperty(navigator, "userAgentData", { val
 setPhone(true);
 navigator.canShare = () => true;
 navigator.share = async ({ files }) => { shared = files[0]; };
+const sendPdf = async () => (await waitFor(() => [...$("share-status").querySelectorAll("button")].find((x) => x.textContent === "Send as a PDF instead"), 60000, "PDF choice")).click();
 $("settings").click(); await sleep(300);
 $("share").click();
+await sendPdf();
 await waitFor(() => shared, 60000, "share");
 r.file = { name: shared.name, type: shared.type, mb: +(shared.size / 1e6).toFixed(1) };
 r.status = await waitFor(() => $("share-status").textContent, 5000, "status");
@@ -39,6 +42,7 @@ navigator.canShare = () => true;
 const origClick = HTMLAnchorElement.prototype.click;
 HTMLAnchorElement.prototype.click = function () { if (this.download) downloaded = this.download; else origClick.call(this); };
 $("share").click();
+await sendPdf();
 await waitFor(() => downloaded, 60000, "download");
 r.downloadName = downloaded;
 HTMLAnchorElement.prototype.click = origClick;

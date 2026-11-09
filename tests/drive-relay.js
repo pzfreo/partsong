@@ -27,7 +27,15 @@ const share = async (button = "share", statusId = "share-status") => {
   await waitFor(() => shared, 90000, "share");
   return { status: await waitFor(() => $(statusId).textContent, 5000, "status"), shared };
 };
-const pdfHasLink = async (file) => (await file.text()).includes("/URI");
+// A share link (#s=...) in the PDF; its last page also links to the app itself.
+const pdfHasLink = async (file) => (await file.text()).includes("#s=");
+// No link could be made: the reason, with Try again and Send as a PDF instead.
+const sendPdf = async (statusId) => {
+  const b = await waitFor(() => [...$(statusId).querySelectorAll("button")].find((x) => x.textContent === "Send as a PDF instead"), 90000, "PDF choice");
+  const offered = $(statusId).textContent;
+  b.click();
+  return offered;
+};
 
 // 1. Relay up: just the link (WhatsApp drops text that comes with a file).
 let s = await share();
@@ -80,18 +88,24 @@ r.whileOpenOffer = await offerIn(f, "offer while open");
 f = frame(link.replace(/#s=[\w-]{22}/, "#s=ZZZZZZZZZZZZZZZZZZZZZZ"));
 r.expiredNotice = await offerIn(f, "expired notice");
 
-// 5. Relay down when sharing: the PDF instead, no link anywhere.
+// 5. Relay down when sharing: nothing is sent; it says why and offers Try
+// again or the PDF, and the PDF has no share link.
 localStorage.setItem("partsong.relay", "http://localhost:9");
 // (A change first, or the kept link would be shared without uploading.)
 $("settings").click(); await sleep(300);
 $("tempo").value = 100; $("tempo").dispatchEvent(new Event("input", { bubbles: true })); $("tempo").dispatchEvent(new Event("change", { bubbles: true })); await sleep(600);
 $("panel-close").click(); await sleep(200);
-s = await share();
-r.relayDown = { status: s.status, text: s.shared.text ?? null, file: s.shared.files[0].name, pdfHasLink: await pdfHasLink(s.shared.files[0]) };
+shared = null;
+$("new-scan").click(); history.back(); await sleep(400);
+await waitFor(() => document.querySelector('#library li[data-id="rel-1"] button'), 5000, "library").then((b) => b.click());
+await sleep(500);
+$("share").click();
+const offered = await sendPdf("share-status");
+await waitFor(() => shared, 30000, "PDF shared");
+r.relayDown = { offered, status: await waitFor(() => $("share-status").textContent, 5000, "status"), text: shared.text ?? null, file: shared.files[0].name, pdfHasLink: await pdfHasLink(shared.files[0]) };
 
-// 6. The same on a computer, from Share part with score: the PDF is
-// downloaded, and Partsong says why there's no link (it used to just say
-// "Saved ✓", like Export PDF).
+// 6. The same on a computer, from Send a link in the panel: the reason and
+// the choice under the button; the PDF is downloaded.
 Object.defineProperty(navigator, "userAgentData", { value: { mobile: false }, configurable: true });
 let downloaded = null;
 const click = HTMLAnchorElement.prototype.click;
@@ -99,9 +113,22 @@ HTMLAnchorElement.prototype.click = function () { if (this.download) downloaded 
 $("settings").click(); await sleep(300);
 $("tempo").value = 110; $("tempo").dispatchEvent(new Event("input", { bubbles: true })); $("tempo").dispatchEvent(new Event("change", { bubbles: true })); await sleep(600);
 $("share-score").click();
-await waitFor(() => downloaded, 90000, "desktop download");
+const offeredDesktop = await sendPdf("panel-share-status");
+await waitFor(() => downloaded, 30000, "desktop download");
 await sleep(100);
-r.desktopRelayDown = { downloaded, label: $("share-score").textContent, says: $("error-toast").hidden ? null : $("error-toast").textContent };
+r.desktopRelayDown = { downloaded, offered: offeredDesktop, label: $("share-score").textContent, says: $("panel-share-status").textContent };
 HTMLAnchorElement.prototype.click = click;
+
+// 7. Try again once the relay is back: the link is shared.
+Object.defineProperty(navigator, "userAgentData", { value: { mobile: true }, configurable: true });
+$("tempo").value = 120; $("tempo").dispatchEvent(new Event("input", { bubbles: true })); $("tempo").dispatchEvent(new Event("change", { bubbles: true })); await sleep(600);
+$("panel-close").click(); await sleep(200);
+shared = null;
+$("share").click();
+const retry = await waitFor(() => [...$("share-status").querySelectorAll("button")].find((x) => x.textContent === "Try again"), 90000, "Try again");
+localStorage.setItem("partsong.relay", "http://localhost:8787");
+retry.click();
+await waitFor(() => shared, 90000, "link shared");
+r.tryAgain = { isLink: /#s=/.test(shared.text ?? ""), files: shared.files?.length ?? 0 };
 localStorage.removeItem("partsong.relay");
 window.result = r;
