@@ -12,4 +12,6 @@ binding = "SHARES"
 bucket_name = "partsong-shares"
 
 [vars]
-ORIGINS = "https://partsong.app"
+# The app, and the test site (partsong-test.vercel.app), whose Send link
+# otherwise always falls back to a PDF.
+ORIGINS = "https://partsong.app,https://partsong-test.vercel.app"
