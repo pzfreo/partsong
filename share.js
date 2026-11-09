@@ -71,23 +71,26 @@ async function pdfFile(entry, photos) {
     readBy: entry.readBy,
     sharedBy: { version: SHOWN_VERSION, browser: navigator.userAgent, at: Date.now() },
   };
-  const app = new URL("./", location.href).href.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const appUrl = new URL("./", location.href).href;
+  const app = appUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
   const pages = `${entry.pages.length} page${entry.pages.length === 1 ? "" : "s"}`;
   const lines = [
     ["F2", 20, entry.title],
-    ["F1", 12, `A Partsong score (${pages}) for learning your part: ${app}`],
+    ["F1", 12, `A Partsong score (${pages}) for learning your part: ${app}`, true],
     ["F1", 12, ""],
     ["F1", 12, "To practise with it in Partsong:"],
     ["F1", 12, "- Partsong app installed (Android): share this file to Partsong."],
-    ["F1", 12, `- Otherwise: open ${app}, tap Open file and choose this file.`],
+    ["F1", 12, `- Otherwise: open ${app}, tap Open file and choose this file.`, true],
     ["F1", 12, "  On iPhone, first save it from WhatsApp with Share, then Save to Files."],
     ["F1", 12, ""],
-    ["F1", 9, `Read by Partsong ${entry.readBy ? `${entry.readBy.version} on ${entry.readBy.device}, ${new Date(entry.readBy.at).toISOString().slice(0, 10)}` : "an earlier version"}; this file from ${SHOWN_VERSION}.`],
+    ["F1", 9, `${entry.readBy ? `Read by Partsong ${entry.readBy.version} on ${entry.readBy.device}, ${new Date(entry.readBy.at).toISOString().slice(0, 10)}` : "Read by an earlier version of Partsong"}; this file from ${SHOWN_VERSION}.`],
   ];
   const note = [];
   let y = 780;
-  for (const [font, size, text] of lines) {
+  const links = []; // [x0, y0, x1, y1] of the lines naming the app: tapping one opens it
+  for (const [font, size, text, link] of lines) {
     note.push(`BT /${font} ${size} Tf 50 ${y} Td ${pdfText(text)} Tj ET`);
+    if (link) links.push([48, y - 4, 545, y + size]);
     y -= size + 10;
   }
 
@@ -133,9 +136,11 @@ async function pdfFile(entry, photos) {
   }
   const notePage = 8 + photos.length * 3;
   const text = bytes(note.join("\n"));
-  obj(notePage, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents ${notePage + 1} 0 R >>`);
+  const annots = links.map((_, i) => notePage + 2 + i);
+  obj(notePage, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents ${notePage + 1} 0 R /Annots [${annots.map((n) => `${n} 0 R`).join(" ")}] >>`);
   obj(notePage + 1, `<< /Length ${text.length} >>`, text);
-  const size = notePage + 2;
+  links.forEach((rect, i) => obj(annots[i], `<< /Type /Annot /Subtype /Link /Rect [${rect.join(" ")}] /Border [0 0 0] /A << /S /URI /URI ${pdfText(appUrl)} >> >>`));
+  const size = notePage + 2 + links.length;
   const xref = pos;
   add(`xref\n0 ${size}\n0000000000 65535 f \n`);
   for (let n = 1; n < size; n++) add(`${String(offsets[n]).padStart(10, "0")} 00000 n \n`);
