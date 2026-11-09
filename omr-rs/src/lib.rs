@@ -20,12 +20,12 @@ use homr_rs::musicxml::{generate_xml_with, XmlOptions};
 use homr_rs::page::PageMasks;
 use staffs::analyse_page;
 use homr_rs::preprocess::{autocrop, bgr_to_gray, clahe, masks, merge_tiles, postprocess, resize_image, tile_input, tile_origins, Bgr, WIN};
-use homr_rs::score::{symbol_center, PageMapping, Row};
+use homr_rs::score::{symbol_center, PageMapping};
 use homr_rs::staff::Staff;
 use homr_rs::staff_image::{prepare_staff, to_model_input, Regions, StaffMapping};
 use homr_rs::tokens::{is_lower, Symbol, Vocab};
 use homr_rs::warp::Gray;
-use layout::{drop_false_key_changes, layout_systems, parse_staffs_by_layout, Reader, Stop};
+use layout::{drop_false_key_changes, layout_systems, parse_staffs_by_layout, Reader, Row, Stop};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -134,6 +134,8 @@ impl Page {
         let m = postprocess(masks(&merged, h, w), &mut self.gray);
         self.mapping = Some(PageMapping { cropped: self.cropped, preprocessed: (h, w), crop: (self.crop.0 as f64, self.crop.1 as f64) });
         let pm = PageMasks { h, w, notehead: &m.notehead, symbols: &m.symbols, staff: &m.staff, clefs_keys: &m.clefs_keys, stem_rests: &m.stems_rest };
+        // Not homr's repair_systems: Partsong's own layout rules group the
+        // systems (repair_systems split Of a Rose's pages 2, 4, 8 and 10 wrongly).
         self.multi = analyse_page(&pm)?;
         Ok(())
     }
@@ -147,7 +149,7 @@ impl Page {
             Err(Stop::Error(e)) => Err(e),
             Ok(voices) => {
                 let voices: Vec<Vec<Symbol>> = voices.into_iter().map(drop_false_key_changes).collect();
-                let opts = XmlOptions { drop_zero_rests: true, note_comments: Some(note_comments) };
+                let opts = XmlOptions { note_comments: Some(note_comments) };
                 generate_xml_with(&voices, "", opts).map(Some)
             }
         }

@@ -56,7 +56,20 @@ function showError(message) {
   clearTimeout(showError.timer);
   showError.timer = setTimeout(() => (el.hidden = true), 8000);
 }
-window.addEventListener("error", (e) => showError(e.message));
+// Only errors from Partsong's own code: a browser extension's script in the
+// page reports through here too (seen: "reading 'M_ID'" on Windows), and a
+// script from another site reports only "Script error.", with no file.
+const originOf = (url) => {
+  try {
+    return new URL(url).origin; // blob:https://partsong.app/… gives the page's
+  } catch {
+    return "";
+  }
+};
+window.addEventListener("error", (e) => {
+  if (e.message === "Script error." || (e.filename && originOf(e.filename) !== location.origin)) return;
+  showError(e.message);
+});
 window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason)));
 window.reportError ??= (e) => showError(e?.message ?? String(e));
 const OSMD_URL = "lib/opensheetmusicdisplay@2.2.0/build/opensheetmusicdisplay.min.js"; // scripts/fetch-libs.sh
@@ -756,6 +769,20 @@ async function countReturn() {
   } catch {}
 }
 
+// Each new score read (not the sample, not a reading again) counted with how
+// many this device has read and on which of its days of use, to see whether
+// people come back to read another: "read-ok: score 2, day 2–3". The tally
+// starts with this count, so scores read before it aren't in it.
+const READS = "partsong-reads";
+function countRead() {
+  try {
+    const n = +(localStorage.getItem(READS) || 0) + 1;
+    localStorage.setItem(READS, n);
+    const days = JSON.parse(localStorage.getItem(USE_DAYS) || "null")?.days ?? 1;
+    track(`read-ok: score ${group(n, [2, 3, 4, 6, 11], 1)}, day ${group(days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
+  } catch {}
+}
+
 // Why a reading failed, short enough to count: the error's last line,
 // without file paths, and with
 // numbers as N so the same failure counts together. Never the score or photo.
@@ -776,7 +803,7 @@ async function trySample() {
   loadScan();
   $("scan-name").value = "If ye love me (sample)";
   // The reader misses the forward repeat at the start of bar 14.
-  scanSettings = { repeats: { 26: 14 } };
+  scanSettings = { repeats: { 26: 14 }, sample: true };
   setPageStatus("Opening the sample…");
   try {
     const blob = await (await fetch("samples/tallis-if-ye-love-me.pdf")).blob();
@@ -898,7 +925,10 @@ function keepAwake() {
 }
 
 async function addPage(image) {
-  const blob = await uprightPhoto(image);
+  // Our own copy: iOS can stop letting Safari read a picked photo later (e.g.
+  // after the app was in the background), and an upright photo is kept as is.
+  const copy = new Blob([await image.arrayBuffer()], { type: image.type });
+  const blob = await uprightPhoto(copy);
   pages.push({ blob, url: URL.createObjectURL(blob) });
   renderPages();
 }
@@ -949,7 +979,12 @@ $("gallery").onchange = (e) => {
 };
 
 async function rotatePage(p) {
-  p.blob = await rotateBlob(p.blob, 90);
+  try {
+    p.blob = await rotateBlob(p.blob, 90);
+  } catch {
+    setPageStatus(`Couldn't turn page ${pages.indexOf(p) + 1}: ${LOST_PICTURE}.`);
+    return;
+  }
   delete p.xml;
   URL.revokeObjectURL(p.url);
   p.url = URL.createObjectURL(p.blob);
@@ -1013,11 +1048,12 @@ async function normalise(blob) {
 
 // A saved page whose picture the phone has lost can't be read again: say
 // what to do rather than show the browser's error.
+const LOST_PICTURE = "the phone has lost the picture of this page. Tap Discard this scan, then add the pages or PDF again";
 async function pagePixels(blob) {
   try {
     return await normalise(blob);
   } catch {
-    throw new Error("the phone has lost the picture of this page. Tap Discard this scan, then add the pages or PDF again");
+    throw new Error(LOST_PICTURE);
   }
 }
 
@@ -1114,7 +1150,8 @@ async function checkSystems(stopped) {
     $("recognise").hidden = false;
   }
   scanSettings.systemsChecked = true;
-  if (scanId) await db.update(scanId, { systemHints: scanSettings.systemHints, systemsChecked: true }).catch(() => {});
+  // Reading again: the saved score stays as it was until the new reading is saved.
+  if (scanId && !rereading) await db.update(scanId, { systemHints: scanSettings.systemHints, systemsChecked: true }).catch(() => {});
 }
 
 // The check screen: pages are added as their systems are found; done()
@@ -1223,8 +1260,9 @@ async function readScan() {
     const t0 = performance.now();
     // Only a read of every page gives the time a whole score takes.
     const fresh = pages.every((p) => !p.xml);
-    // Systems you've just fixed are read as they are.
-    if (!rereading && !scanSettings.systemsChecked) await checkSystems(stopped);
+    // Systems you've just fixed are read as they are; Read again shows them
+    // to check (the reader may group them differently now).
+    if (!scanSettings.systemsChecked) await checkSystems(stopped);
     $("read-step").hidden = false;
     for (let i = 0; i < pages.length; i++) {
       if (pages[i].xml) continue;
@@ -1259,6 +1297,7 @@ async function readScan() {
     setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${pages.length} page${pages.length === 1 ? "" : "s"}`);
     track(`read-ok (${deviceTag})`);
+    if (!rereading && !scanSettings.sample) countRead();
   } catch (e) {
     pageLabel = "";
     if (e instanceof Stopped) {
@@ -1325,7 +1364,8 @@ async function openFiles(files) {
     for (const f of files) {
       const shared = await readScoreFile(f);
       if (shared) {
-        await importScore(shared);
+        track("receive: file");
+        await importScore(shared, true);
         continue;
       }
       if (await isPdf(f)) {
@@ -1366,8 +1406,15 @@ async function asNewScore(entry) {
   return entry;
 }
 
-async function importScore(entry) {
+// A score shared to this device is marked, so that its first play is counted:
+// do people who are sent a score get as far as hearing it?
+async function importScore(entry, received = false) {
+  if (received) {
+    entry.received = true;
+    entry.receivedPlayed = false;
+  }
   await db.put(await asNewScore(entry));
+  if (received) track("receive-added");
   openScore(entry);
 }
 
@@ -1570,6 +1617,7 @@ async function copyScore(id) {
 // decrypted, then offered like any other. If the relay can't supply it, say
 // what to do: try again, or ask for it again (a link lasts a year).
 async function receiveFromRelay() {
+  track("receive: link");
   const fragment = location.hash.slice(1);
   history.replaceState(null, "", location.pathname);
   $("library-status").textContent = "Fetching the shared score…";
@@ -1581,7 +1629,8 @@ async function receiveFromRelay() {
   }
   $("library-status").textContent = "";
   if (entry) offerImport(entry);
-  else
+  else track(`receive-failed (${deviceTag}): ${failure.includes("404") ? "link expired" : "couldn't fetch"}`);
+  if (!entry)
     showNotice(
       failure.includes("404")
         ? "This link has expired (links last a year). Ask for the score to be shared again."
@@ -1595,6 +1644,7 @@ async function receiveFromRelay() {
 // (an installed app opened from the link has no way back to that page). Older
 // files sent only #receive. Always asks first, since any page could try this.
 async function receiveFromPage() {
+  track("receive: old file");
   const hash = location.hash;
   history.replaceState(null, "", location.pathname);
   let entry = null;
@@ -1609,9 +1659,11 @@ async function receiveFromPage() {
     if (!entry && payload) entry = await entryFromLink(payload);
     if (!entry) throw new Error("the score didn't arrive");
   } catch (e) {
+    track(`receive-failed (${deviceTag}): old file`);
     showError(`Couldn't open the shared score: ${e.message}`);
   }
   if (entry?.photosLeftOut) {
+    track(`receive-failed (${deviceTag}): old file without photos`);
     // Only the music came through the link (the installed app can't reach the
     // file's page): don't add a copy without its photos.
     showNotice(
@@ -1657,10 +1709,11 @@ async function offerImport(entry, done = () => {}) {
   $("import-yes").onclick = async () => {
     $("import-offer").hidden = true;
     if ((await done()) === false) return;
-    await importScore(entry);
+    await importScore(entry, true);
   };
   $("import-no").onclick = () => {
     $("import-offer").hidden = true;
+    track("receive-cancelled");
     done();
   };
 }
@@ -1681,6 +1734,7 @@ async function openInbox() {
     const f = new File([await res.blob()], name, { type: res.headers.get("content-type") || "" });
     const shared = await readScoreFile(f).catch(() => null);
     if (shared) {
+      track("receive: file");
       await offerImport(shared, () => cache.delete(req));
       continue;
     }
@@ -2332,7 +2386,7 @@ $("fix-done").onclick = () => {
   const { id, created, title, images, pages: xmls, pending: _pending, excluded: _excluded, ...settings } = liveEntry(current);
   prepared = preparedAudio = null;
   loadScan(images, xmls.map((x, i) => (changed.includes(i) ? null : x)), id, created, title);
-  scanSettings = { ...settings, systemHints: hints };
+  scanSettings = { ...settings, systemHints: hints, systemsChecked: true };
   rereading = true;
   readScan();
 };
@@ -2668,6 +2722,11 @@ $("play").onclick = () => {
   setPlaying(true);
   if (!playTracked) track("play", hasMarks() ? "play (marked)" : "play");
   playTracked = true;
+  if (current.received && !current.receivedPlayed) {
+    current.receivedPlayed = true;
+    db.update(current.id, { receivedPlayed: true }).catch(() => {});
+    track(`play-received (${deviceKind})`);
+  }
 };
 
 $("rewind").onclick = () => {
@@ -2701,7 +2760,8 @@ $("read-again").onclick = () => {
   const { id, created, title, images, pages: _pages, pending: _pending, excluded: _excluded, ...settings } = liveEntry(current);
   prepared = preparedAudio = null;
   loadScan(images, [], id, created, title);
-  scanSettings = settings;
+  // Its systems are shown to check again, with any you fixed before.
+  scanSettings = { ...settings, systemsChecked: false };
   rereading = true;
   readScan();
 };
@@ -3083,8 +3143,10 @@ window.launchQueue?.setConsumer(async ({ files: handles }) => {
   for (const handle of handles ?? []) {
     const f = await handle.getFile();
     const shared = await readScoreFile(f).catch(() => null);
-    if (shared) await offerImport(shared);
-    else scans.push(f);
+    if (shared) {
+      track("receive: file");
+      await offerImport(shared);
+    } else scans.push(f);
   }
   if (scans.length) {
     loadScan();

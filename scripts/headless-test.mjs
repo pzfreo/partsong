@@ -4,11 +4,12 @@
 // drive.js (optional) is evaluated in the page after load; it may call
 // `await shot()` to request a screenshot and must set window.result.
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const [url, out, timeoutSec = "900", driveFile, shotPrefix] = process.argv.slice(2);
+const SHOTS = join(dirname(new URL(import.meta.url).pathname), "..", "shots");
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const port = +(process.env.CDP_PORT || 9333);
 // CDP_HOST: drive a browser already running there (e.g. Edge in a Windows VM,
@@ -68,7 +69,11 @@ ws.onmessage = ({ data }) => {
     }
     if (text === "__SHOT__" || text === "__SHOTVIEW__") {
       send("Page.captureScreenshot", { format: "png", captureBeyondViewport: text === "__SHOT__" }).then((r) => {
-        const file = `${shotPrefix}-${++shots}.png`;
+        // A bare name (e.g. "shot", or none) goes in shots/, so screenshots of
+        // the app never land among the score images in testdata/.
+        const prefix = shotPrefix?.includes("/") ? shotPrefix : join(SHOTS, shotPrefix || "shot");
+        const file = `${prefix}-${++shots}.png`;
+        mkdirSync(dirname(file), { recursive: true });
         writeFileSync(file, Buffer.from(r.data, "base64"));
         console.log("screenshot", file);
         send("Runtime.evaluate", { expression: "window.__shotDone()" });

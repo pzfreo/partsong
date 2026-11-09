@@ -154,7 +154,9 @@ then *Add to Home screen*.
 - **Usage counts**: GoatCounter (partsong.goatcounter.com), cookie-free and
   anonymous: page views plus a few events via `track()` in `app.js` (sample,
   read-ok/read-failed with page count, first play per opened score, share,
-  install, report). Never titles or music. Its script skips localhost.
+  install, report; each new score read as "read-ok: score N, day D"; a
+  received score's receive / receive-failed / receive-added /
+  receive-cancelled / play-received). Never titles or music. Its script skips localhost.
   `tests/drive-analytics.js` checks the events with GoatCounter stubbed.
 - **Sample score** (*Try a sample score*): `samples/tallis-if-ye-love-me.pdf`,
   Tallis's *If ye love me* (ed. K. Jaworski, CPDL licence), three pages: four
@@ -203,7 +205,10 @@ The service worker is skipped on `localhost`; use `http://127.0.0.1:8765` to
 exercise it. A phone needs HTTPS (camera, caches), so test there via the deployed
 site.
 
-Headless browser tests (put score images/MusicXML in the gitignored `testdata/`;
+Headless browser tests (put score images/MusicXML in the gitignored `testdata/`,
+a clone of the private repo pzfreo/partsong-testdata, so commit and push new test files there;
+screenshots taken with a bare name such as `shot` go to the gitignored `shots/`,
+never `testdata/`, so they aren't mistaken for scores;
 the orientation tests also need simulated camera photos `cam_<page>_exif<tag>.jpg`:
 each page's pixels turned 90° anticlockwise, saved with EXIF orientation 1, 3 or 6):
 

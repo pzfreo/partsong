@@ -8,12 +8,12 @@ const ORT_URL = new URL("lib/onnxruntime-web@1.30.0/dist/", import.meta.url).hre
 const MODEL_CACHE = "partscanner-models-v1";
 const MODELS = [
   "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx",
-  "encoder_pytorch_model_465-597144cab54c8f6d0f6c9619df5c5312694eadd6.onnx",
-  "decoder_pytorch_model_465-597144cab54c8f6d0f6c9619df5c5312694eadd6.onnx",
+  "encoder_pytorch_model_509-2293bba14bfea47d9d28411339362af15fce4c31.onnx",
+  "decoder_pytorch_model_509-2293bba14bfea47d9d28411339362af15fce4c31.onnx",
 ];
 // Uncompressed total, for progress: servers may gzip, so content-length
 // doesn't match the bytes received.
-const MODELS_TOTAL_BYTES = 157482318;
+const MODELS_TOTAL_BYTES = 157528486;
 // The big convolutional models gain from the GPU; the decoder runs in homr-rs.
 const GPU_MODELS = new Set([MODELS[0], MODELS[1]]);
 
@@ -35,7 +35,7 @@ const STALL_MS = 30000;
 const MODEL_SIZES = {
   [MODELS[0]]: 57311361,
   [MODELS[1]]: 52861122,
-  [MODELS[2]]: 47309835,
+  [MODELS[2]]: 47356003,
 };
 const modelUrl = (name) => new URL("models/" + name, location.href).href;
 const pieceKey = (name, i) => `${modelUrl(name)}?piece=${i}`;
@@ -94,6 +94,19 @@ async function downloadModel(name) {
     loaded = end + 1;
     post({ type: "progress", stage: "download", name, loaded, total: MODELS_TOTAL_BYTES });
   }
+}
+
+// Models from earlier versions (e.g. the 465 pair, about 100 MB) would stay in
+// Cache Storage for good, and phones are short of quota: remove what MODELS
+// doesn't name once the current ones are stored. Best effort.
+async function dropOldModels() {
+  try {
+    const cache = await caches.open(MODEL_CACHE);
+    const current = MODELS.map((name) => modelUrl(name));
+    for (const req of await cache.keys()) {
+      if (!current.some((u) => req.url === u || req.url.startsWith(u + "?"))) await cache.delete(req);
+    }
+  } catch {}
 }
 
 // A stored piece can vanish between the download check and here (seen on
@@ -587,6 +600,7 @@ async function init(noGpu, exact) {
   for (const name of MODELS) {
     await downloadModel(name);
   }
+  await dropOldModels();
   post({ type: "ready", gpu: useGpu });
 }
 
