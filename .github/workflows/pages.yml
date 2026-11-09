@@ -24,6 +24,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the whole history, to number the version
+      # Kept between deploys, so a GitHub release outage (504s) can't stop one.
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('scripts/fetch-models.sh') }}
       - name: Fetch homr's models
         run: scripts/fetch-models.sh
       - name: Fetch the libraries the app serves itself
