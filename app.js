@@ -1096,7 +1096,9 @@ function ask(msg, transfer) {
 
 $("recognise").onclick = () => (reading ? stopReading?.() : readScan());
 
-const NO_MUSIC = /No (staffs|noteheads) found\s*$/;
+// The reader's errors for a page with no music (homr-rs: "No staffs found",
+// "No noteheads or clefs found"; earlier "No noteheads found").
+const NO_MUSIC = /No (staffs|noteheads|noteheads or clefs) found\s*$/;
 
 // ---------- two phases: the systems on every page, then the staves ----------
 // Finding each page's systems is quick; reading every staff is the slow part.
