@@ -15,7 +15,8 @@ mkdir -p models
 for m in "${MODELS[@]}"; do
   if [ ! -f "models/$m.onnx" ]; then
     echo "Downloading $m"
-    curl -fsSL -o "models/$m.zip" "$BASE_URL/$m.zip"
+    # GitHub release downloads sometimes fail for a while (504s): keep trying.
+    curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors -o "models/$m.zip" "$BASE_URL/$m.zip"
     unzip -o -q -j "models/$m.zip" '*.onnx' -d models
     rm "models/$m.zip"
   fi
