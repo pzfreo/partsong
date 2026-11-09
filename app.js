@@ -33,7 +33,8 @@ const IN_APP_TIP = " This is Instagram's or Facebook's own browser: open partson
 const VERSION = new URL(import.meta.url).searchParams.get("v") || "dev";
 // Deploys are numbered by how many commits main has (see pages.yml), so a
 // newer version always has a bigger number.
-const SHOWN_VERSION = /^\d+$/.test(VERSION) ? `v${VERSION}` : VERSION;
+const shownVersion = (v) => (/^\d+$/.test(v) ? `v${v}` : v);
+const SHOWN_VERSION = shownVersion(VERSION);
 const deviceKind = /iPhone|iPod/.test(ua) ? "iPhone" : iDevice ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Macintosh/.test(ua) ? "Mac" : /CrOS/.test(ua) ? "ChromeOS" : /Linux/.test(ua) ? "Linux" : "other";
 // Counts by device carry the version too, to see whether a fix worked.
 const deviceTag = `${deviceKind} ${SHOWN_VERSION}`;
@@ -289,18 +290,35 @@ $("report-share").onclick = async () => {
 // A deploy stamps its version into index.html (scripts/stamp-version.mjs).
 // When the app comes back to the screen, or every 30 minutes, fetch the page
 // fresh and compare; if it's newer, offer a reload rather than forcing one.
+// Whether people take updates is counted (GoatCounter): offered, Later and
+// Update, each at most once per opening (Later's banner comes back), with the
+// device and the versions.
 let lastUpdateCheck = 0;
+let updateTag = "";
+const updateCounted = new Set();
+const countUpdate = (what) => updateCounted.has(what) || (updateCounted.add(what), track(`update-${what} (${updateTag})`, undefined, what === "now" ? 0 : 30));
 async function checkForUpdate() {
   if (VERSION === "dev" || !navigator.onLine || Date.now() - lastUpdateCheck < 60000) return;
   lastUpdateCheck = Date.now();
   try {
     const html = await (await fetch(`./?check=${Date.now()}`, { cache: "no-store" })).text();
     const live = /app\.js\?v=(\w+)/.exec(html)?.[1];
-    if (live && live !== VERSION) $("update-banner").hidden = false;
+    if (live && live !== VERSION && $("update-banner").hidden) {
+      $("update-banner").hidden = false;
+      updateTag = `${deviceTag}→${shownVersion(live)}`;
+      countUpdate("offered");
+    }
   } catch {}
 }
-$("update-now").onclick = () => location.reload();
-$("update-later").onclick = () => ($("update-banner").hidden = true);
+// Update waits (up to 3 s) for GoatCounter's script so the count is sent
+// before the reload; a second tap does nothing.
+$("update-now").onclick = async (e) => {
+  e.currentTarget.disabled = true;
+  for (let i = 0; i < 6 && !window.goatcounter?.count; i++) await new Promise((r) => setTimeout(r, 500));
+  countUpdate("now");
+  setTimeout(() => location.reload(), 300);
+};
+$("update-later").onclick = () => { countUpdate("later"); $("update-banner").hidden = true; };
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && checkForUpdate());
 setInterval(checkForUpdate, 30 * 60000);
 setTimeout(checkForUpdate, 10000);
