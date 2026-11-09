@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>Recognition audit regression</title>
+<pre id="result">Running…</pre><script type="module">
+import { parsePage, buildScore } from "../score.js?audit=2";
+import { auditRecognition, restoreNamedTenorClef } from "../recognition-diagnostics.js?audit=2";
+try {
+  const xml = `<score-partwise><part-list><score-part id="P1"><part-name>Voice</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef><measure-style><multiple-rest>8</multiple-rest></measure-style></attributes></measure><measure number="2"><note><pitch><step>A</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure><measure number="3"><attributes><measure-style><multiple-rest>2</multiple-rest></measure-style></attributes></measure></part></score-partwise>`;
+  const logs = [];
+  auditRecognition(xml, 1, (s) => logs.push(s), { tenor: true });
+  const fixed = restoreNamedTenorClef(xml, "My Tenor", (s) => logs.push(s));
+  if (restoreNamedTenorClef(fixed, "My Tenor", () => {}) !== fixed) throw Error("Correction is not idempotent");
+  if (restoreNamedTenorClef(xml, "My Soprano", () => {}) !== xml) throw Error("Changed another voice");
+  const score = buildScore([parsePage(fixed)]);
+  if (score.measures[0].length !== 32 || score.measures[2].length !== 8) throw Error("Multi-rest duration wrong: " + JSON.stringify(score.measures.map(m=>m.length)));
+  if (score.lines[0].notes[0].t !== 32) throw Error("Note starts before multi-rest ends");
+  if (score.lines[0].notes[0].midi !== 57) throw Error("Tenor octave wrong or applied twice");
+  if (!logs.some((s) => s.includes("multi-rest=8")) || !logs.some((s) => s.includes("marker absent"))) throw Error("Missing diagnostics");
+  document.getElementById("result").textContent = "PASS: multi-rest timing, tenor octave, idempotence and diagnostics.";
+} catch (e) { document.getElementById("result").textContent = `FAIL: ${e.stack}`; }
+</script>

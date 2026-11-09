@@ -6,6 +6,7 @@
 set -euo pipefail
 
 FILES=(
+  "da6267cfe5036ae718a59eece3b5744a4655b0b8faa9f16259362b783d74c9bb tesseract.js@6.0.1/dist/tesseract.esm.min.js"
   "3dffff71811bc13a3a3d9591c57ca5ee5735b8f5f3eaf789510b02bb040ae3a0 onnxruntime-web@1.30.0/dist/ort.webgpu.min.mjs"
   "3d1c85995364bb643302fc6fd877a0c3ba5ae72401815e0f24828a53d9191e28 onnxruntime-web@1.30.0/dist/ort-wasm-simd-threaded.asyncify.mjs"
   "39f9f0894d478800487ed9f7dbe92618498db320cf55c8e3d89adff8dce658da onnxruntime-web@1.30.0/dist/ort-wasm-simd-threaded.asyncify.wasm"

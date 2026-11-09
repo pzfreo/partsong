@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Lyrics preservation test</title>
+<pre id="result">Running…</pre>
+<script type="module">
+import { addLyricsToXml, filterSelectedPart } from "../lyrics.js";
+try {
+  const xml = `<score-partwise><part-list><score-part id="P1"><part-name>Tenor</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><key><fifths>-1</fifths></key><time><beats>3</beats><beat-type>2</beat-type></time><clef><sign>G</sign><line>2</line><clef-octave-change>-1</clef-octave-change></clef></attributes><note><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><type>whole</type><tie type="start"/><!-- imgpos: 100, 200 --></note><note><rest/><duration>2</duration></note></measure></part></score-partwise>`;
+  const note = { t: 0, dur: 4, midi: 67, pos: { x: 100, y: 200 } };
+  const score = { systems: [{ index: 0, start: 0, end: 6 }], lines: [{ notes: [note] }], measures: [{ sheet: 0, sheetBar: 0, start: 0, length: 6 }] };
+  const output = addLyricsToXml(xml, score, { 0: 0 }, { 0: ["A&B", "O"] }, 0);
+  const doc = new DOMParser().parseFromString(output, "application/xml");
+  if (doc.querySelector("parsererror")) throw new Error("Invalid XML");
+  if (doc.querySelectorAll("lyric").length !== 2) throw new Error("Missing verses");
+  if (doc.querySelector("lyric text").textContent !== "A&B") throw new Error("Text escaping failed");
+  doc.querySelectorAll("lyric").forEach((el) => el.remove());
+  const original = new DOMParser().parseFromString(xml, "application/xml");
+  if (!doc.documentElement.isEqualNode(original.documentElement)) throw new Error("Source notation changed");
+  score.lines[0].staffKey = "1#0/1";
+  score.measures[0].system = 0;
+  const ensemble = xml.replace("</part-list>", '<score-part id="P2"><part-name>Other</part-name></score-part></part-list>').replace("</score-partwise>", '<part id="P2"><measure number="1"><note><rest/><duration>6</duration></note></measure></part></score-partwise>');
+  const filtered = new DOMParser().parseFromString(filterSelectedPart(ensemble, score, { 0: 0 }, 0), "application/xml");
+  if (filtered.querySelectorAll("score-partwise > part").length !== 1 || filtered.querySelector('part[id="P2"]')) throw new Error("Other part still visible");
+  if (!filtered.querySelector("part").isEqualNode(original.querySelector("part"))) throw new Error("Selected notation changed");
+  const shared = `<score-partwise><part-list><score-part id="choir"><part-name>Choir</part-name></score-part></part-list><part id="choir"><measure><attributes><divisions>1</divisions><staves>2</staves><clef number="1"><sign>G</sign><line>2</line></clef><clef number="2"><sign>F</sign><line>4</line></clef></attributes><note><pitch><step>C</step><octave>5</octave></pitch><duration>6</duration><voice>1</voice><staff>1</staff><!-- imgpos: 100, 200 --></note><backup><duration>6</duration></backup><note><pitch><step>C</step><octave>3</octave></pitch><duration>6</duration><voice>1</voice><staff>2</staff><!-- imgpos: 100, 500 --></note><backup><duration>6</duration></backup><note><pitch><step>G</step><octave>2</octave></pitch><duration>6</duration><voice>2</voice><staff>2</staff><!-- imgpos: 100, 530 --></note></measure></part></score-partwise>`;
+  score.lines[0].notes = [{ t: 0, dur: 6, midi: 48, pos: { x: 100, y: 500 } }];
+  score.lines[0].voice = "upper";
+  const tenor = new DOMParser().parseFromString(filterSelectedPart(shared, score, { 0: 0 }, 0), "application/xml");
+  if (tenor.querySelectorAll("note").length !== 1) throw new Error("Other choir voices retained");
+  if (tenor.querySelector("note octave").textContent !== "3" || tenor.querySelector("clef sign").textContent !== "F") throw new Error("Wrong voice or clef");
+  if (tenor.querySelector("note staff").textContent !== "1") throw new Error("Staff not renumbered");
+  document.getElementById("result").textContent = "PASS: lyric insertion and selected-part filtering preserve original notation.";
+} catch (e) { document.getElementById("result").textContent = `FAIL: ${e.message}`; }
+</script>

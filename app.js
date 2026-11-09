@@ -1,5 +1,7 @@
 import { buildScore, parsePage, playOrder } from "./score.js";
 import { Player } from "./player.js";
+import { auditRecognition, restoreNamedTenorClef } from "./recognition-diagnostics.js";
+import { selectedNotes, addLyricsToXml, filterSelectedPart, chooseLyricRegions, recognizeVerses } from "./lyrics.js";
 import { AUDIO_RATE, audioFile } from "./audio.js";
 import * as db from "./db.js";
 import { rotateBlob, uprightPhoto } from "./orient.js";
@@ -92,6 +94,7 @@ function show(name, nav = "push") {
     releasePhotos("practice");
     $("photo-list").replaceChildren();
     $("panel").hidden = $("panel-backdrop").hidden = true;
+    $("settings").setAttribute("aria-expanded", "false");
   }
   if (name === "home") renderLibrary();
   if (name !== "home" && nav === "push") history.pushState({ screen: name }, "");
@@ -100,9 +103,10 @@ function show(name, nav = "push") {
 }
 
 function goHome() {
-  const depth = history.state?.panel || history.state?.markup ? 2 : history.state?.screen ? 1 : 0;
-  if (depth) history.go(-depth);
-  else show("home", "none");
+  // The header arrow always leaves the score. A fixed history offset can
+  // land on an older settings entry after several panel/mark-up changes.
+  history.replaceState({}, "");
+  show("home", "none");
 }
 $("back").onclick = goHome;
 
@@ -1798,7 +1802,16 @@ function placeMap(from, to) {
 function openScore(entry, nav = "push") {
   const partChosen = entry.mine != null || Object.keys(entry.manual ?? {}).length > 0; // before defaults below
   current = entry;
+  const report = (message) => {
+    console.info("[score-audit]", message);
+    remember(readerLog, message, 150);
+  };
+  entry.pages = entry.pages.map((xml, index) => {
+    auditRecognition(xml, index + 1, report, { tenor: /\btenor\b/i.test(entry.title) });
+    return restoreNamedTenorClef(xml, entry.title, report);
+  });
   score = buildScore(entry.pages.map(parsePage));
+  report(`Playback built: ${score.measures.length} written measures, ${score.length} quarter beats, ${score.lines.length} lines.`);
   migrateLayout(entry);
   player?.stop();
   player = new Player(score);
@@ -1867,6 +1880,51 @@ const SVG = "http://www.w3.org/2000/svg";
 const MAX_SIDE = 4200; // must match normalise(): homr's coordinates are in that space
 let pageViews = []; // per page: { svg, bar, playhead, note, w, h }
 let followedBar = null;
+let partViews = new Map();
+
+$("only-my-part").onchange = () => {
+  renderPartStrips();
+  showBar(currentBeat());
+};
+
+function renderPartStrips() {
+  partViews = new Map();
+  const available = Object.keys(current.manual).length > 0;
+  $("only-my-part").disabled = !available || marking;
+  if (!available || marking) $("only-my-part").checked = false;
+  const on = $("only-my-part").checked;
+  $("photo-list").hidden = on;
+  $("part-strips").hidden = !on;
+  $("part-strips").replaceChildren();
+  if (!on) return;
+  for (const sys of score.systems) {
+    const id = current.manual[sys.index];
+    const staff = sys.staves.find((s) => s.key === current.markedStaff?.[sys.index] && s.lines.includes(id))
+      ?? sys.staves.find((s) => s.lines.includes(id));
+    const page = pageViews[sys.page];
+    if (!staff || !page?.w) continue;
+    const next = sys.staves.find((s) => s.y0 > staff.y1);
+    const nextSystem = score.systems.find((s) => s.page === sys.page && s.index > sys.index && s.box);
+    // Lyrics are below this staff. Stay close to its top edge to avoid
+    // including the preceding staff's second verse.
+    const y = Math.max(0, staff.y0 - page.h * 0.005);
+    const end = Math.min(page.h, (next?.y0 ?? nextSystem?.box?.y0 ?? page.h) - page.h * 0.006);
+    const svg = document.createElementNS(SVG, "svg");
+    svg.setAttribute("viewBox", `0 ${y} ${page.w} ${end - y}`);
+    svg.setAttribute("aria-label", `Your part, system ${sys.index + 1}`);
+    const image = document.createElementNS(SVG, "image");
+    image.setAttribute("href", page.svg.previousElementSibling.src);
+    image.setAttribute("width", page.w);
+    image.setAttribute("height", page.h);
+    const view = { svg, w: page.w, h: page.h, cropY: y, cropH: end - y,
+      bar: svgEl("rect", "bar"), playhead: svgEl("line", "playhead"), note: svgEl("circle", "note") };
+    svg.append(image, view.bar, view.playhead, view.note);
+    svg.onclick = (e) => pickBar(sys.page, e, view, sys.index);
+    partViews.set(sys.index, view);
+    $("part-strips").append(svg);
+  }
+  followedBar = null;
+}
 
 function svgEl(tag, cls) {
   const el = document.createElementNS(SVG, tag);
@@ -1929,12 +1987,13 @@ const hide = (el) => (el.style.display = "none");
 // Highlights the bar at `beat`; while playing also moves the playhead and
 // marks the note your part is singing.
 function follow(beat, playing = true) {
+  if ($("follow").hidden) return;
   const bar = barAt(beat);
   if (!bar.area) return;
-  const view = pageViews[bar.page];
+  const view = $("only-my-part").checked ? partViews.get(bar.system) : pageViews[bar.page];
   if (!view?.w) return;
   if (bar !== followedBar) {
-    for (const v of pageViews) [v.bar, v.playhead, v.note].forEach(hide);
+    for (const v of [...pageViews, ...partViews.values()]) [v.bar, v.playhead, v.note].forEach(hide);
     const r = padded(bar.area, view);
     showEl(view.bar, { x: r.x, y: r.y, width: r.w, height: r.h, rx: view.w * 0.006 });
     followedBar = bar;
@@ -1972,6 +2031,9 @@ function keepInView(el) {
   const bottom = $("panel").hidden || window.matchMedia("(min-width: 1000px)").matches
     ? window.innerHeight - document.querySelector(".transport").offsetHeight
     : $("panel").getBoundingClientRect().top;
+  // A system with lyrics can be taller than the viewport. Once its top is
+  // aligned, scrolling on every bar cannot make the whole system fit.
+  if (r.height > bottom - top && Math.abs(r.top - top) < 8) return;
   if (r.top >= top && r.bottom <= bottom) return;
   window.scrollBy({ top: r.top - top - Math.max(0, (bottom - top - r.height) / 3), behavior: "smooth" });
 }
@@ -1984,12 +2046,17 @@ function tapPoint(page, e) {
 }
 
 // Tap a bar on a photo to start from it.
-function pickBar(page, e) {
-  const { view, x, y } = tapPoint(page, e);
+function pickBar(page, e, cropped, system) {
+  const point = cropped ? (() => {
+    const r = cropped.svg.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * cropped.w, y: cropped.cropY + (e.clientY - r.top) / r.height * cropped.cropH };
+  })() : tapPoint(page, e);
+  const { x, y } = point;
   let best = null;
   let bestDist = Infinity;
   for (const bar of score.measures) {
     if (bar.page !== page || !bar.area) continue;
+    if (system != null && bar.system !== system) continue;
     const r = bar.area; // not padded: the padding reaches into the next system
     const dx = Math.max(r.x0 - x, 0, x - r.x1);
     const dy = Math.max(r.y0 - y, 0, y - r.y1);
@@ -2088,6 +2155,9 @@ $("octave").onchange = () => {
 // shading it: one line can run over two staves of a system when the reader
 // files them under one part.
 function setMarks(manual, markedStaff = {}) {
+  recognizedFor = null;
+  recognizedVerses = {};
+  osmdFor = null;
   current.manual = manual;
   current.markedStaff = markedStaff;
   updateEntry(current.id, { manual, markedStaff });
@@ -2118,6 +2188,8 @@ let fixing = false; // marking systems (Fix systems) rather than your part
 
 function startMarkup(mode = "part") {
   if ($("view-toggle").hidden) return;
+  $("only-my-part").checked = false;
+  renderPartStrips();
   setView("pages");
   player.stop();
   // Reuse the open panel's history entry (going back then pushing would race).
@@ -2338,6 +2410,7 @@ function renderMarks() {
       }
     }
   }
+  renderPartStrips();
 }
 
 function barAt(beat) {
@@ -2437,6 +2510,10 @@ function renderLines() {
         updateEntry(current.id, { mine: line.id });
         renderLines();
         applyMix();
+        recognizedFor = null;
+        recognizedVerses = {};
+        osmdFor = null;
+        if (!$("read-view").hidden) renderRead();
       };
       const include = li.querySelector('input[type="checkbox"]');
       include.checked = !current.excluded.includes(line.id);
@@ -2649,6 +2726,125 @@ $("delete").onclick = () => {
 // Follow-along on the As read view: OSMD knows where it drew each bar.
 let readViews = []; // per page: { osmd, div, bar, playhead }
 let readBar = null;
+$("export-read-pdf").onclick = () => {
+  if (!readViews.length || !readViews.some((view) => view.osmd)) return;
+  player?.stop();
+  $("print-score-title").textContent = $("title").value;
+  window.print();
+};
+let lyricWorker = null;
+let lyricBusy = false;
+let recognizedVerses = {};
+let recognizedFor = null;
+let recognizedPlacement = "below";
+
+function selectedPartMap() {
+  return Object.fromEntries(score.systems.map((system) => [system.index, hasMarks() ? current.manual[system.index] : current.mine]));
+}
+$("read-only-part").onchange = () => {
+  $("read-only-hint").hidden = !$("read-only-part").checked;
+  osmdFor = null;
+  renderRead();
+};
+
+$("recognized-part").onchange = () => {
+  $("recognition-tools").hidden = !$("recognized-part").checked;
+  osmdFor = null;
+  renderRead();
+};
+$("cancel-lyrics").onclick = () => {
+  lyricBusy = false;
+  lyricWorker?.terminate();
+  lyricWorker = null;
+  $("lyric-status").textContent = "Recognition cancelled.";
+};
+function editRecognizedVerses() {
+  $("lyric-editor").replaceChildren();
+  for (const system of score.systems) {
+    if (!(system.index in recognizedVerses)) continue;
+    const label = document.createElement("label");
+    label.textContent = `System ${system.index + 1}: one syllable per note, _ to skip; one verse per line`;
+    const input = document.createElement("textarea");
+    input.rows = Math.max(2, recognizedVerses[system.index].length);
+    input.value = recognizedVerses[system.index].join("\n");
+    input.dataset.system = system.index;
+    label.append(input);
+    $("lyric-editor").append(label);
+  }
+  $("apply-lyrics").hidden = false;
+}
+$("apply-lyrics").onclick = () => {
+  for (const input of $("lyric-editor").querySelectorAll("textarea")) recognizedVerses[input.dataset.system] = input.value.split("\n");
+  osmdFor = null;
+  renderRead();
+};
+$("recognize-lyrics").onclick = async () => {
+  if (lyricBusy) return;
+  const entry = current;
+  const selection = selectedPartMap();
+  const marks = JSON.stringify(selection);
+  if (!Object.values(selection).some((id) => id != null)) {
+    $("lyric-status").textContent = "Mark your part on the pages first.";
+    return;
+  }
+  lyricBusy = true;
+  $("recognize-lyrics").disabled = true;
+  $("cancel-lyrics").hidden = false;
+  recognizedVerses = {};
+  try {
+    $("lyric-status").textContent = "Loading lyric recognition…";
+    const { default: { createWorker } } = await import("./lib/tesseract.js@6.0.1/dist/tesseract.esm.min.js");
+    const language = $("lyric-language").value;
+    const position = $("lyric-position").value;
+    recognizedPlacement = position;
+    lyricWorker = await createWorker(language);
+    $("lyric-language").disabled = $("lyric-position").disabled = true;
+    await lyricWorker.setParameters({ tessedit_pageseg_mode: "6" });
+    for (const system of score.systems) {
+      if (!lyricBusy || current !== entry || JSON.stringify(selectedPartMap()) !== marks) throw new Error("Recognition stopped because the score or marks changed.");
+      const id = selection[system.index];
+      const staff = system.staves.find((s) => s.key === current.markedStaff?.[system.index] && s.lines.includes(id)) ?? system.staves.find((s) => s.lines.includes(id));
+      const page = pageViews[system.page];
+      if (!staff || !page?.w) continue;
+      const next = system.staves.find((s) => s.y0 > staff.y1);
+      const nextSystem = score.systems.find((s) => s.page === system.page && s.index > system.index && s.box);
+      const bottom = Math.min(next?.y0 ?? nextSystem?.box?.y0 ?? page.h, staff.y1 + page.h * 0.065) - page.h * 0.008;
+      $("lyric-status").textContent = `Recognizing lyrics: system ${system.index + 1} of ${score.systems.length}…`;
+      const notes = selectedNotes(score, selection, system);
+      const image = page.svg.previousElementSibling;
+      let verses = [];
+      let above = [], below = [];
+      if (position !== "below") {
+        const allStaves = score.systems.filter((s) => s.page === system.page).flatMap((s) => s.staves).sort((a, b) => a.y0 - b.y0);
+        const previous = allStaves.findLast((s) => s.y1 < staff.y0);
+        const top = position === "auto" && previous
+          ? previous.y1 + page.h * 0.005
+          : Math.max(0, previous?.y1 ?? 0, staff.y0 - page.h * 0.065);
+        above = await recognizeVerses(image, page, { y1: top }, staff.y0 - page.h * 0.008, notes, lyricWorker, language);
+      }
+      if (position !== "above") below = await recognizeVerses(image, page, staff, bottom, notes, lyricWorker, language);
+      verses = position === "auto"
+        ? chooseLyricRegions(above, below, notes, system.bars)
+        : [...above, ...below];
+      recognizedVerses[system.index] = verses;
+    }
+    if (!lyricBusy || current !== entry) return;
+    recognizedFor = entry;
+    editRecognizedVerses();
+    $("lyric-status").textContent = "Recognition finished. Review the syllables and alignment below; corrections apply to this view only.";
+    osmdFor = null;
+    await renderRead();
+  } catch (e) {
+    $("lyric-status").textContent = lyricBusy ? `Couldn't recognize lyrics: ${e.message}` : "Recognition cancelled.";
+  } finally {
+    await lyricWorker?.terminate();
+    lyricWorker = null;
+    lyricBusy = false;
+    $("recognize-lyrics").disabled = false;
+    $("lyric-language").disabled = $("lyric-position").disabled = false;
+    $("cancel-lyrics").hidden = true;
+  }
+};
 
 function readMark(cls) {
   const el = document.createElement("div");
@@ -2690,18 +2886,24 @@ function followRead(beat, playing = true) {
   if ($("read-view").hidden || !readViews.length) return;
   const bar = barAt(beat);
   const view = readViews[bar.sheet];
-  const box = view && readBarBox(view, bar.sheetBar);
+  // Geometry stays fixed within a bar. Avoid layout reads on every frame.
+  const box = view && (bar === readBar ? view.followBox : readBarBox(view, bar.sheetBar));
   if (!box) return;
   if (bar !== readBar) {
     for (const v of readViews) v.bar.hidden = v.playhead.hidden = true;
     place(view.bar, box);
+    view.followBox = box;
+    place(view.playhead, { x: 0, y: box.y, w: 3, h: box.h });
+    view.playhead.hidden = !playing;
     readBar = bar;
     if (playing) keepInView(view.bar);
   }
   if (!playing) return;
   const from = box.x + box.lead;
-  const x = from + ((box.w - box.lead) * Math.min(1, Math.max(0, beat - bar.start))) / bar.length;
-  place(view.playhead, { x: x - 1.5, y: box.y, w: 3, h: box.h });
+  const progress = Math.min(1, Math.max(0, (beat - bar.start) / bar.length));
+  const x = from + (box.w - box.lead) * progress;
+  view.playhead.style.transform = `translateX(${x - 1.5}px)`;
+  view.playhead.hidden = false;
 }
 
 // homr numbers each page's bars from 1; renumber to match the bar counter.
@@ -2761,16 +2963,21 @@ $("view-toggle").onclick = () => setView($("read-view").hidden ? "read" : "pages
 // Scrolls the highlighted bar of the visible view into the middle of the screen.
 function revealCurrentBar() {
   const bar = barAt(currentBeat());
-  const el = $("read-view").hidden ? pageViews[bar.page]?.bar : readViews[bar.sheet]?.bar;
+  const el = $("read-view").hidden
+    ? ($("only-my-part").checked ? partViews.get(bar.system)?.bar : pageViews[bar.page]?.bar)
+    : readViews[bar.sheet]?.bar;
   if (el && el.style.display !== "none" && !el.hidden) el.scrollIntoView({ block: "center" });
 }
 
 // Draws the recognised MusicXML with OSMD, loaded on first use.
 let osmdLoaded;
 let osmdFor = null; // the score currently drawn
+let readRenderId = 0;
 async function renderRead() {
   if (osmdFor === current) return;
+  $("export-read-pdf").disabled = true;
   const entry = (osmdFor = current);
+  const renderId = ++readRenderId;
   $("osmd").replaceChildren();
   readViews = [];
   readBar = null;
@@ -2786,13 +2993,31 @@ async function renderRead() {
   });
   try {
     await osmdLoaded;
-    for (const xml of entry.pages) {
+    const recognized = $("recognized-part").checked;
+    if (recognized && recognizedFor !== entry) {
+      recognizedVerses = {};
+      $("lyric-editor").replaceChildren();
+      $("apply-lyrics").hidden = true;
+      $("lyric-status").textContent = "Recognize lyrics to add words to your marked staff in the original As read notation. Corrections are kept for this session.";
+    }
+    const selection = selectedPartMap();
+    const pages = entry.pages.map((xml, sheet) => {
+      const withLyrics = recognized ? addLyricsToXml(xml, score, selection, recognizedVerses, sheet, recognizedPlacement) : xml;
+      return $("read-only-part").checked ? filterSelectedPart(withLyrics, score, selection, sheet) : withLyrics;
+    });
+    for (const xml of pages) {
       // Draw a page at a time so playback and scrolling get a turn in between.
       await new Promise((r) => setTimeout(r, 0));
-      if (osmdFor !== entry) return; // another score was opened meanwhile
+      if (osmdFor !== entry || renderId !== readRenderId) return;
       const div = document.createElement("div");
       div.className = "read-page";
       $("osmd").append(div);
+      if (xml == null) {
+        div.classList.add("muted");
+        div.textContent = `Page ${readViews.length + 1}: no notes are assigned to your selected part. Uncheck “Show only my selected part” to see its recognized notation, or mark the appropriate staff in Pages mode.`;
+        readViews.push({ osmd: null, div, bar: readMark("read-bar"), playhead: readMark("read-playhead") });
+        continue;
+      }
       const osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(div, {
         autoResize: false,
         drawTitle: false,
@@ -2819,6 +3044,7 @@ async function renderRead() {
     }
     showBar(currentBeat());
     if (!$("read-view").hidden) revealCurrentBar();
+    $("export-read-pdf").disabled = !readViews.some((view) => view.osmd);
   } catch (e) {
     osmdFor = null;
     $("osmd").textContent = e.message;
