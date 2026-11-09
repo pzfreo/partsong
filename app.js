@@ -296,11 +296,18 @@ async function checkForUpdate() {
   try {
     const html = await (await fetch(`./?check=${Date.now()}`, { cache: "no-store" })).text();
     const live = /app\.js\?v=(\w+)/.exec(html)?.[1];
-    if (live && live !== VERSION) $("update-banner").hidden = false;
+    if (live && live !== VERSION && $("update-banner").hidden) {
+      $("update-banner").hidden = false;
+      // Counted once per opening, though Later's banner comes back.
+      if (!updateTag) track(`update-offered (${(updateTag = `${deviceTag}→${/^\d+$/.test(live) ? `v${live}` : live}`)})`);
+    }
   } catch {}
 }
-$("update-now").onclick = () => location.reload();
-$("update-later").onclick = () => ($("update-banner").hidden = true);
+// Whether people take updates: offered, then Update or Later (closed), each
+// with the device and the versions.
+let updateTag = "";
+$("update-now").onclick = () => { track(`update-now (${updateTag})`); setTimeout(() => location.reload(), 300); };
+$("update-later").onclick = () => { track(`update-later (${updateTag})`); $("update-banner").hidden = true; };
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && checkForUpdate());
 setInterval(checkForUpdate, 30 * 60000);
 setTimeout(checkForUpdate, 10000);

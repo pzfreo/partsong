@@ -10,18 +10,30 @@ document.body.prepend(f);
 await waitFor(() => f.contentDocument?.getElementById("update-banner") && f.contentWindow.document.readyState === "complete", 20000, "app");
 const d = () => f.contentDocument, $ = (id) => d().getElementById(id);
 const r = {};
+// Usage counts, kept here so they survive the app's reload.
+const events = [];
+const stub = () => (f.contentWindow.goatcounter = { count: (e) => events.push(e.path) });
+stub(); // (again before each check, in case GoatCounter's own script loaded since)
 await sleep(11000); // first check at 10 s: same version, no banner
 r.noBannerWhenCurrent = $("update-banner").hidden;
 console.log("__EXEC__ sed -i '' 's/?v=v1/?v=v2/g' \"$SITE/index.html\"");
 await sleep(62000); // checks are at most once a minute
-f.contentDocument.dispatchEvent(new Event("visibilitychange"));
+stub(); f.contentDocument.dispatchEvent(new Event("visibilitychange"));
 await waitFor(() => !$("update-banner").hidden, 10000, "update banner");
 r.bannerOnNewVersion = true;
+// Later, then the banner again (checks continue), then Update: offered is
+// counted once for this opening.
+$("update-later").click();
+await sleep(62000);
+stub(); f.contentDocument.dispatchEvent(new Event("visibilitychange"));
+await waitFor(() => !$("update-banner").hidden, 10000, "update banner again");
 $("update-now").click();
 await sleep(500);
 await waitFor(() => $("about-version") && f.contentWindow.document.readyState === "complete", 20000, "reloaded");
 await sleep(1000);
 $("about").hidden = false; // version shown on the About page
+r.events = events;
+r.updateCounts = events.filter((e) => e.startsWith("update-")).map((e) => e.replace(/\(\w+ /, "(")).join("|") === "update-offered (v1→v2)|update-later (v1→v2)|update-now (v1→v2)";
 r.afterUpdate = { version: d().querySelector("script[src^='app.js']").getAttribute("src"), banner: $("update-banner").hidden ? "hidden" : "shown" };
 // Install card.
 let prompted = false;
