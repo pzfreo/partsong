@@ -90,7 +90,9 @@ self.addEventListener("fetch", (e) => {
         return res;
       }).then(isolated), // the reader's threads are workers made from these files: without the headers an isolated page refuses them
     );
-  } else if (url.origin === location.origin && !url.pathname.includes("/models/")) {
+  } else if (url.origin === location.origin && !url.pathname.includes("/models/") && !url.pathname.includes("/video/")) {
+    // (Videos go straight to the network: Safari plays them only in ranges,
+    // which this refetch would drop, and they're too big to keep.)
     // no-cache: revalidate with the server so app updates show up on the next
     // load instead of after the HTTP cache (10 min on GitHub Pages) expires.
     // Each fresh copy is also kept without its ?v=…, so the plain entry is

@@ -317,6 +317,7 @@ input[type="radio"], input[type="checkbox"] { width: 20px; height: 20px; accent-
 .page-zoom-bar span { flex: 1; color: var(--muted); }
 /* Privacy notice and terms (privacy.html, terms.html). */
 .legal { line-height: 1.55; }
+.how-video { display: block; width: 100%; max-width: 340px; aspect-ratio: 412 / 915; margin: 10px auto 0; border-radius: 16px; background: #2b2870; }
 .legal h2 { font-size: 1.5rem; margin-top: 8px; }
 .legal h3 { font-size: 1.08rem; margin: 26px 0 6px; }
 .legal h4 { font-size: 0.98rem; margin: 18px 0 4px; }

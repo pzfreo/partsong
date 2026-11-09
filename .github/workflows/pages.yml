@@ -37,7 +37,7 @@ jobs:
         run: |
           mkdir -p _site
           cp -r index.html privacy.html terms.html learn-your-choir-part.html rehearsal-tracks.html choir-directors.html cpdl.html faq.html *.js styles.css manifest.webmanifest icon.svg icon-192.png icon-512.png favicon.ico og-image.png robots.txt sitemap.xml \
-            omr models lib fonts _site/
+            omr models lib fonts video _site/
           mkdir -p _site/samples && cp samples/tallis-if-ye-love-me.pdf _site/samples/
       # The version is the number of commits on main: it only ever goes up
       # (v121, v122, ...), and `git rev-list --reverse HEAD | sed -n 121p`
