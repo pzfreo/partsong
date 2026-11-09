@@ -1,7 +1,8 @@
 // Share from the library list, including the "tap again" path when the
 // browser refuses the share sheet because the tap was too long ago.
 // Run against http://localhost:8765/index.html.
-// These test the PDF share; with no relay reachable, sharing falls back to it.
+// These test the PDF share: with no relay reachable, a share offers it
+// (Send as a PDF instead).
 localStorage.setItem("partsong.relay", "http://localhost:9");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(100); } throw new Error("timeout waiting for " + label); };
@@ -29,9 +30,11 @@ navigator.share = async ({ files }) => { calls++; if (calls === 1) throw new DOM
 const statuses = [];
 const obs = new MutationObserver(() => statuses.push($("library-status").textContent));
 obs.observe($("library-status"), { childList: true, characterData: true, subtree: true });
+const pdfChoice = () => [...$("library-status").querySelectorAll("button")].find((x) => x.textContent === "Send as a PDF instead");
 btn.click();
+(await waitFor(pdfChoice, 30000, "PDF choice")).click();
 await waitFor(() => /Ready to share: tap again/.test($("library-status").textContent), 30000, "retry prompt");
-btn.click();
+pdfChoice().click();
 await waitFor(() => shared.length, 10000, "shared");
 r.statuses = [...new Set(statuses.filter(Boolean))];
 r.file = shared[0].name;

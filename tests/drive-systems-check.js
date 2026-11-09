@@ -3,6 +3,8 @@
 // staves with them. There was a tree, page 1, whose piano the reader leaves
 // out of the choir's systems, fixed here reads once with those systems, and
 // the parts panel afterwards doesn't ask you to check the systems again.
+// The bar shows how many systems the red lines make, updated on each tap
+// ("so far" until every page's systems are found, then "in all").
 // Run against http://localhost:8765/index.html.
 window.manualCheck = true;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,7 +31,7 @@ $("recognise").click();
 await waitFor(() => !$("systems-check").hidden, 900000, "systems check");
 // It opens as soon as page 1's systems are found, the rest following, and
 // Read music waits for the last.
-const r = { firstShown: document.querySelectorAll("#check-list .check-page").length, lockedWhileFinding: $("check-done").hidden && !$("check-stop").hidden && $("recognise").hidden, waitText: $("check-wait").textContent };
+const r = { systemsWhileFinding: $("check-systems").textContent, firstShown: document.querySelectorAll("#check-list .check-page").length, lockedWhileFinding: $("check-done").hidden && !$("check-stop").hidden && $("recognise").hidden, waitText: $("check-wait").textContent };
 await waitFor(() => !$("check-done").hidden, 900000, "all systems found");
 r.stopGone = $("check-stop").hidden;
 r.doneText = $("check-wait").textContent;
@@ -46,9 +48,13 @@ const tap = (y) => {
 const bands = [[605, 1380], [1720, 2050], [2390, 2870]];
 const inside = (y) => bands.some(([top, bottom]) => top < y && y < bottom);
 const gaps = () => [...svg.querySelectorAll("line.fix-split, line.fix-gap")].map((l) => ({ y: +l.getAttribute("y1"), split: l.classList.contains("fix-split") }));
+// The bar counts the systems the red lines make on every page.
+const redLines = () => [...document.querySelectorAll("#check-list svg")].reduce((n, x) => n + x.querySelectorAll("line.fix-split").length + 1, 0);
+r.systemsBefore = [$("check-systems").textContent, redLines()];
 r.gapsBefore = gaps().map((g) => (g.split ? "|" : ".")).join("");
 for (const g of gaps()) if (g.split === inside(g.y)) tap(g.y);
 r.gapsAfter = gaps().map((g) => (g.split ? "|" : ".")).join("");
+r.systemsAfter = [$("check-systems").textContent, redLines()];
 await shot(false);
 r.staffsReadWhileChecking = staffReads;
 $("check-done").click();
@@ -60,9 +66,13 @@ r.pagesRead = pagesRead;
 r.hints = entry.systemHints && Object.keys(entry.systemHints).join(",");
 r.checkHidden = $("systems-check").hidden && !$("recognise").hidden;
 r.checkedKept = entry.systemsChecked === true;
-// The parts are still muddled (tree's layout changes), but the panel doesn't
-// send you back to check the systems you've just OK'd.
+// The panel doesn't send you back to check the systems you've just OK'd.
+// (Its parts used to look muddled here, so it offered the fix steps; since
+// the v211 reader they don't, so doubtShown is only recorded.)
 r.doubtShown = !$("parts-doubt").hidden;
+r.lines = s.lines.map((l) => l.label);
 r.fixStepHidden = $("doubt-fix-step").hidden;
-r.ok = r.firstShown === 1 && r.lockedWhileFinding && /^Finding the lines of music \(systems\): page 2 of 6/.test(r.waitText) && r.doneText === "Red lines look right?" && r.stopGone && r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.doubtShown && r.fixStepHidden;
+r.ok = r.firstShown === 1 && r.lockedWhileFinding && /^Finding the lines of music \(systems\): page 2 of 6/.test(r.waitText) && r.doneText === "Red lines look right?" && r.stopGone && r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.fixStepHidden
+  && r.systemsBefore[0] === `${r.systemsBefore[1]} systems in all.` && r.systemsAfter[0] === `${r.systemsAfter[1]} systems in all.` && r.systemsAfter[1] !== r.systemsBefore[1]
+  && /^\d+ systems? so far\.$/.test(r.systemsWhileFinding);
 window.result = r;

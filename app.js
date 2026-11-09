@@ -1158,8 +1158,10 @@ const CHECK_LINES = "Each red line marks where one line of music (system) ends: 
 const CHECK_INTRO = `Pages appear as they're found. ${CHECK_LINES}`;
 function openCheck() {
   const drafts = {};
+  let finished = false; // every page's systems found
   const labels = {};
   $("check-list").replaceChildren();
+  $("check-systems").textContent = "";
   $("check-intro").textContent = CHECK_INTRO;
   // Stop reading moves into the bar at the bottom as Cancel (the button above
   // scrolls away), and becomes Next once every page's systems are found.
@@ -1196,16 +1198,20 @@ function openCheck() {
         const rect = svg.getBoundingClientRect();
         const y = ((e.clientY - rect.top) / rect.height) * d.h;
         if (toggleGap(d, y)) drawGaps(g, d, d.w);
+        $("check-systems").textContent = systemsCount(drafts, finished);
         const gaps = d.rows.slice(1).map((row, k) => `${Math.round((d.rows[k].y1 + row.y0) / 2)}${d.splits[k] ? "|" : "."}`);
         remember(readerLog, `Check tap p${i + 1} at y ${Math.round(y)} of ${Math.round(d.h)}: ${gaps.join(" ")}`.slice(0, 200), 40);
       };
       div.append(img, svg);
       $("check-list").append(label, div);
+      $("check-systems").textContent = systemsCount(drafts, finished);
     },
     waiting(text) {
       $("check-wait").textContent = text;
     },
     done(doubtful) {
+      finished = true;
+      $("check-systems").textContent = systemsCount(drafts);
       for (const i of doubtful) if (labels[i]) labels[i].textContent += ": looks unusual";
       const which = doubtful.map((i) => i + 1);
       const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
@@ -1488,21 +1494,21 @@ async function shareScore(id, button, status, label) {
         if (prepared.link) await rememberLink(id, { key, link: prepared.link, at: Date.now() });
       }
     }
-    const linked = !!prepared.link;
-    const why = prepared.why;
-    const how = linked ? await shareLink(prepared.link, prepared.title) : await shareFile(prepared.file, prepared.title);
-    if (how === "shared" || how === "downloaded" || how === "copied") track(linked ? "share" : "share-pdf");
+    if (!prepared.link) {
+      // No link: nothing is sent behind their back. Say why, and offer to try
+      // again or to send the score as a PDF (which opens in Partsong too).
+      const failed = prepared;
+      prepared = null;
+      linkFailed(id, button, status, label, failed);
+      return;
+    }
+    const how = await shareLink(prepared.link, prepared.title);
+    if (how === "shared" || how === "downloaded" || how === "copied") track("share");
     if (how !== "retry") prepared = null;
     if (how === "retry") say("ready", "Ready to share: tap again.", "Ready to share");
     else if (how === "cancelled") say("idle", "");
     else if (how === "copied") say("done", "Name and link copied: paste them into a message.", "Link copied ✓");
-    else if (!linked) {
-      // No link: say why, and that the PDF is what to send instead.
-      const where = how === "downloaded" ? "saved the PDF to Downloads" : "shared the PDF";
-      const long = `Couldn't make a link (${why ?? "the link service didn't respond"}), so Partsong ${where} instead: send that file, which opens in Partsong.`;
-      say("done", long, how === "downloaded" ? "Saved PDF ✓" : "Shared as PDF ✓");
-      if (!status) showError(long);
-    } else if (how === "downloaded") say("done", "Saved to Downloads.", "Saved ✓");
+    else if (how === "downloaded") say("done", "Saved to Downloads.", "Saved ✓");
     else say("done", "Shared.", "Shared ✓");
   } catch (e) {
     prepared = null;
@@ -1513,6 +1519,28 @@ async function shareScore(id, button, status, label) {
 }
 
 $("share").onclick = () => shareScore(current.id, $("share"), $("share-status"));
+
+// A link couldn't be made: the reason, with Try again and Send as a PDF
+// instead, until one is tapped (it doesn't fade like other share messages).
+function linkFailed(id, button, status, label, { file, title, why }) {
+  clearTimeout(button.revert);
+  if (label) button.textContent = label;
+  const choice = (text, onclick) => Object.assign(document.createElement("button"), { className: "link", textContent: text, onclick });
+  const again = choice("Try again", () => {
+    status.replaceChildren();
+    shareScore(id, button, status, label);
+  });
+  const pdf = choice("Send as a PDF instead", async () => {
+    const how = await shareFile(file, title);
+    if (how === "shared" || how === "downloaded") track("share-pdf");
+    // The phone refused the share sheet (too long since the tap): tap again.
+    if (how === "retry") return status.replaceChildren("Ready to share: tap again. ", pdf);
+    status.replaceChildren(
+      how === "downloaded" ? "PDF saved to Downloads: send that file, which opens in Partsong." : how === "shared" ? "Sent as a PDF." : "",
+    );
+  });
+  status.replaceChildren(`Couldn't make a link: ${why ?? "the link service didn't respond"}. `, again, " · ", pdf);
+}
 
 // An audio file of what Play plays (bars, repeats, your part, the others'
 // volume, sound, tempo and pitch), rendered offline, to share: e.g. for
@@ -1567,7 +1595,7 @@ $("share-audio").onclick = async () => {
 };
 
 // The same link share as the icon by the title.
-$("share-score").onclick = () => shareScore(current.id, $("share-score"), null, SHARE_SCORE);
+$("share-score").onclick = () => shareScore(current.id, $("share-score"), $("panel-share-status"), SHARE_SCORE);
 
 // The score as a .partsong.pdf (pages, with the score inside): a copy to keep,
 // print or send that doesn't expire. Kept while unchanged if the share sheet
@@ -2296,6 +2324,17 @@ function renderFix() {
     const d = fixDraft[p];
     if (fixing && view.w && d) drawGaps(view.fix, d, view.w);
   }
+  $("fix-systems").textContent = systemsCount(fixDraft);
+  // As read: changes only when the pages are read again.
+  $("fix-bars").textContent = `${score.measures.length} bar${score.measures.length === 1 ? "" : "s"} read.`;
+}
+
+// How many systems the red lines make on all the pages, to compare with the
+// printed music (a row read as two systems side by side counts once): "so
+// far" while pages are still being found.
+function systemsCount(drafts, finished = true) {
+  const n = Object.values(drafts).reduce((sum, d) => sum + (d.rows.length ? d.splits.filter(Boolean).length + 1 : 0), 0);
+  return `${n} system${n === 1 ? "" : "s"} ${finished ? "in all" : "so far"}.`;
 }
 
 $("start-fix").onclick = () => startMarkup("systems");

@@ -166,7 +166,7 @@
         <p id="check-intro"></p>
         <div id="check-list" class="photo-list"></div>
         <div class="markup-bar check-bar">
-          <p id="check-wait">Once you're done:</p>
+          <p><span id="check-wait">Once you're done:</span> <strong id="check-systems"></strong></p>
           <button id="check-stop" class="link">Cancel</button>
           <button id="check-done" class="primary" hidden>Next: read the notes ▸</button>
         </div>
@@ -236,6 +236,7 @@
           <button id="share-score">Send a link to another singer</button>
           <p class="hint">Opens this score in Partsong for them, with your part and settings. Works for a year.</p>
         </div>
+        <p id="panel-share-status" class="muted share-status" aria-live="polite"></p>
         <div class="row2 share-item" aria-live="polite">
           <button id="share-audio">Send a recording of my part</button>
           <p class="hint">What Play plays, as an audio file anyone can play.</p>
@@ -290,7 +291,7 @@
       </div>
 
       <div id="fix-bar" class="markup-bar" hidden>
-        <p>Tap between staves to add or remove a split.</p>
+        <p>Tap between staves to add or remove a split. <strong id="fix-systems"></strong> <strong id="fix-bars"></strong></p>
         <button id="fix-cancel">Cancel</button>
         <button id="fix-done" class="primary">Read again</button>
       </div>
