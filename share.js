@@ -9,6 +9,10 @@
 const FORMAT = "partscanner-score";
 const SETTINGS = ["mine", "excluded", "manual", "markedStaff", "octave", "tempo", "others", "locked", "repeats", "playRepeats", "layout"];
 const PHOTO_QUALITY = 0.85;
+// This copy of Partsong (deploys stamp ?v=N on the scripts), for the file's
+// debug info.
+const VERSION = new URL(import.meta.url).searchParams.get("v") || "dev";
+const SHOWN_VERSION = /^\d+$/.test(VERSION) ? `v${VERSION}` : VERSION;
 const PAGE_WIDTH = 595.28; // A4 width in PDF points; photo pages keep their shape
 
 function fromBase64(data, type) {
@@ -62,6 +66,10 @@ async function pdfFile(entry, photos) {
     pages: entry.pages,
     photos: photos.length, // the PDF's own page images (marked /PartsongPhoto)
     settings: Object.fromEntries(SETTINGS.filter((k) => entry[k] !== undefined).map((k) => [k, entry[k]])),
+    // Debug info: which Partsong read the music (kept when a received score is
+    // shared on), and which made this file.
+    readBy: entry.readBy,
+    sharedBy: { version: SHOWN_VERSION, browser: navigator.userAgent, at: Date.now() },
   };
   const app = new URL("./", location.href).href.replace(/^https?:\/\//, "").replace(/\/$/, "");
   const pages = `${entry.pages.length} page${entry.pages.length === 1 ? "" : "s"}`;
@@ -73,6 +81,8 @@ async function pdfFile(entry, photos) {
     ["F1", 12, "- Partsong app installed (Android): share this file to Partsong."],
     ["F1", 12, `- Otherwise: open ${app}, tap Open file and choose this file.`],
     ["F1", 12, "  On iPhone, first save it from WhatsApp with Share, then Save to Files."],
+    ["F1", 12, ""],
+    ["F1", 9, `Read by Partsong ${entry.readBy ? `${entry.readBy.version} on ${entry.readBy.device}, ${new Date(entry.readBy.at).toISOString().slice(0, 10)}` : "an earlier version"}; this file from ${SHOWN_VERSION}.`],
   ];
   const note = [];
   let y = 780;
@@ -106,7 +116,7 @@ async function pdfFile(entry, photos) {
   const name = "(partsong-score.json)";
   obj(1, `<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [${name} 7 0 R] >> >> >>`);
   obj(2, `<< /Type /Pages /Kids [${pageIds.map((n) => `${n} 0 R`).join(" ")}] /Count ${pageIds.length} >>`);
-  obj(3, `<< /Title ${pdfText(entry.title)} /Creator (Partsong) >>`);
+  obj(3, `<< /Title ${pdfText(entry.title)} /Creator (Partsong) /Producer (Partsong ${SHOWN_VERSION}) >>`);
   obj(4, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
   obj(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
   const json = await deflate(JSON.stringify(doc), new CompressionStream("deflate"));
@@ -275,6 +285,7 @@ export function parseScoreFile(text) {
     title: doc.title || "Shared score",
     created: doc.created || Date.now(),
     pages: doc.pages,
+    ...(doc.readBy ? { readBy: doc.readBy } : {}),
     images: (doc.images ?? []).map((d) => fromBase64(d, "image/jpeg")),
   };
 }
