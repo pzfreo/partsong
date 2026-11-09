@@ -3,7 +3,8 @@
 // staves with them. There was a tree, page 1, whose piano the reader leaves
 // out of the choir's systems, fixed here reads once with those systems, and
 // the parts panel afterwards doesn't ask you to check the systems again.
-// The bar shows how many systems the red lines make, updated on each tap.
+// The bar shows how many systems the red lines make, updated on each tap
+// ("so far" until every page's systems are found, then "in all").
 // Run against http://localhost:8765/index.html.
 window.manualCheck = true;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -30,7 +31,7 @@ $("recognise").click();
 await waitFor(() => !$("systems-check").hidden, 900000, "systems check");
 // It opens as soon as page 1's systems are found, the rest following, and
 // Read music waits for the last.
-const r = { firstShown: document.querySelectorAll("#check-list .check-page").length, lockedWhileFinding: $("check-done").hidden && !$("check-stop").hidden && $("recognise").hidden, waitText: $("check-wait").textContent };
+const r = { systemsWhileFinding: $("check-systems").textContent, firstShown: document.querySelectorAll("#check-list .check-page").length, lockedWhileFinding: $("check-done").hidden && !$("check-stop").hidden && $("recognise").hidden, waitText: $("check-wait").textContent };
 await waitFor(() => !$("check-done").hidden, 900000, "all systems found");
 r.stopGone = $("check-stop").hidden;
 r.doneText = $("check-wait").textContent;
@@ -72,5 +73,6 @@ r.doubtShown = !$("parts-doubt").hidden;
 r.lines = s.lines.map((l) => l.label);
 r.fixStepHidden = $("doubt-fix-step").hidden;
 r.ok = r.firstShown === 1 && r.lockedWhileFinding && /^Finding the lines of music \(systems\): page 2 of 6/.test(r.waitText) && r.doneText === "Red lines look right?" && r.stopGone && r.staffsReadBeforeCheck === 0 && r.staffsReadWhileChecking === 0 && r.pagesShown.split(" | ").length === 6 && r.page1 === "6,3,4" && r.pagesRead === 6 && r.hints === "0" && r.checkHidden && r.checkedKept && r.fixStepHidden
-  && r.systemsBefore[0] === `${r.systemsBefore[1]} systems in all.` && r.systemsAfter[0] === `${r.systemsAfter[1]} systems in all.` && r.systemsAfter[1] !== r.systemsBefore[1];
+  && r.systemsBefore[0] === `${r.systemsBefore[1]} systems in all.` && r.systemsAfter[0] === `${r.systemsAfter[1]} systems in all.` && r.systemsAfter[1] !== r.systemsBefore[1]
+  && /^\d+ systems? so far\.$/.test(r.systemsWhileFinding);
 window.result = r;

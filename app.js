@@ -1158,6 +1158,7 @@ const CHECK_LINES = "Each red line marks where one line of music (system) ends: 
 const CHECK_INTRO = `Pages appear as they're found. ${CHECK_LINES}`;
 function openCheck() {
   const drafts = {};
+  let finished = false; // every page's systems found
   const labels = {};
   $("check-list").replaceChildren();
   $("check-systems").textContent = "";
@@ -1197,18 +1198,20 @@ function openCheck() {
         const rect = svg.getBoundingClientRect();
         const y = ((e.clientY - rect.top) / rect.height) * d.h;
         if (toggleGap(d, y)) drawGaps(g, d, d.w);
-        $("check-systems").textContent = systemsCount(drafts);
+        $("check-systems").textContent = systemsCount(drafts, finished);
         const gaps = d.rows.slice(1).map((row, k) => `${Math.round((d.rows[k].y1 + row.y0) / 2)}${d.splits[k] ? "|" : "."}`);
         remember(readerLog, `Check tap p${i + 1} at y ${Math.round(y)} of ${Math.round(d.h)}: ${gaps.join(" ")}`.slice(0, 200), 40);
       };
       div.append(img, svg);
       $("check-list").append(label, div);
-      $("check-systems").textContent = systemsCount(drafts);
+      $("check-systems").textContent = systemsCount(drafts, finished);
     },
     waiting(text) {
       $("check-wait").textContent = text;
     },
     done(doubtful) {
+      finished = true;
+      $("check-systems").textContent = systemsCount(drafts);
       for (const i of doubtful) if (labels[i]) labels[i].textContent += ": looks unusual";
       const which = doubtful.map((i) => i + 1);
       const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
@@ -2305,10 +2308,11 @@ function renderFix() {
 }
 
 // How many systems the red lines make on all the pages, to compare with the
-// printed music (a row read as two systems side by side counts once).
-function systemsCount(drafts) {
+// printed music (a row read as two systems side by side counts once): "so
+// far" while pages are still being found.
+function systemsCount(drafts, finished = true) {
   const n = Object.values(drafts).reduce((sum, d) => sum + (d.rows.length ? d.splits.filter(Boolean).length + 1 : 0), 0);
-  return `${n} system${n === 1 ? "" : "s"} in all.`;
+  return `${n} system${n === 1 ? "" : "s"} ${finished ? "in all" : "so far"}.`;
 }
 
 $("start-fix").onclick = () => startMarkup("systems");
