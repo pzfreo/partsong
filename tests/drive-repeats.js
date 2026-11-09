@@ -49,4 +49,17 @@ seen.length = 0; $("play").click();
 await waitFor(() => { watch(); return seen.length >= 9; }, 20000, "loop");
 $("play").click();
 r.loop = seen.slice(0, 9).join(" ");
+// The First Noel/Pachelbel (testdata/bugs/noel.json, a reading of the
+// PDF a singer sent): one repeat (bars 61-68) with 1st/2nd endings, the 2nd
+// read a bar late. Played through, it must reach the last bar (83) after the
+// repeat, also when the reader misses the 1st ending's bracket end and the
+// 2nd ending (the 1st-time ending then ran to the end of the song, which was
+// skipped after the repeat).
+const { buildScore, parsePage, playOrder } = await import("/score.js");
+const noel = await (await fetch("/testdata/bugs/noel.json")).json();
+const tail = (pages) => { const sc = buildScore(pages.map((x) => parsePage(x))); return playOrder(sc.measures, 0, sc.measures.length - 1).slice(60).map((i) => i + 1).join(" "); };
+r.noel = tail(noel);
+r.noelNoStop = tail(noel.map((x) => x.replace(/<ending type="stop"[^>]*>|<ending type="start" number="2"[^>]*>/g, "")));
+const noelWant = "61 62 63 64 65 66 67 68 61 62 63 64 65 66 67 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83";
+r.noelOk = r.noel === noelWant && r.noelNoStop === noelWant;
 window.result = r;
