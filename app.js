@@ -1160,6 +1160,7 @@ function openCheck() {
   const drafts = {};
   const labels = {};
   $("check-list").replaceChildren();
+  $("check-systems").textContent = "";
   $("check-intro").textContent = CHECK_INTRO;
   // Stop reading moves into the bar at the bottom as Cancel (the button above
   // scrolls away), and becomes Next once every page's systems are found.
@@ -1196,11 +1197,13 @@ function openCheck() {
         const rect = svg.getBoundingClientRect();
         const y = ((e.clientY - rect.top) / rect.height) * d.h;
         if (toggleGap(d, y)) drawGaps(g, d, d.w);
+        $("check-systems").textContent = systemsCount(drafts);
         const gaps = d.rows.slice(1).map((row, k) => `${Math.round((d.rows[k].y1 + row.y0) / 2)}${d.splits[k] ? "|" : "."}`);
         remember(readerLog, `Check tap p${i + 1} at y ${Math.round(y)} of ${Math.round(d.h)}: ${gaps.join(" ")}`.slice(0, 200), 40);
       };
       div.append(img, svg);
       $("check-list").append(label, div);
+      $("check-systems").textContent = systemsCount(drafts);
     },
     waiting(text) {
       $("check-wait").textContent = text;
@@ -2296,6 +2299,16 @@ function renderFix() {
     const d = fixDraft[p];
     if (fixing && view.w && d) drawGaps(view.fix, d, view.w);
   }
+  $("fix-systems").textContent = systemsCount(fixDraft);
+  // As read: changes only when the pages are read again.
+  $("fix-bars").textContent = `${score.measures.length} bar${score.measures.length === 1 ? "" : "s"} read.`;
+}
+
+// How many systems the red lines make on all the pages, to compare with the
+// printed music (a row read as two systems side by side counts once).
+function systemsCount(drafts) {
+  const n = Object.values(drafts).reduce((sum, d) => sum + (d.rows.length ? d.splits.filter(Boolean).length + 1 : 0), 0);
+  return `${n} system${n === 1 ? "" : "s"} in all.`;
 }
 
 $("start-fix").onclick = () => startMarkup("systems");

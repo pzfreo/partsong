@@ -37,10 +37,15 @@ const tap = (y) => {
 const bands = JSON.parse(new URLSearchParams(location.search).get("bands") || "[[605,1380],[1720,2050],[2390,2870]]");
 const inside = (y) => bands.some(([top, bottom]) => top < y && y < bottom);
 const gaps = () => [...svg.querySelectorAll("line.fix-split, line.fix-gap")].map((l) => ({ y: +l.getAttribute("y1"), split: l.classList.contains("fix-split") }));
+// The bar counts the systems the red lines make on every page.
+const redLines = () => [...document.querySelectorAll("#photo-list .page svg")].reduce((n, x) => n + x.querySelectorAll("line.fix-split").length + (x.querySelector("line.fix-split, line.fix-gap") ? 1 : 0), 0);
+r.systemsBefore = [$("fix-systems").textContent, redLines()];
+r.barsShown = [$("fix-bars").textContent, sc.buildScore(entry.pages.map(sc.parsePage)).measures.length];
 r.gapsBefore = gaps().map((g) => (g.split ? "|" : ".")).join("");
 for (const g of gaps()) if (g.split === inside(g.y)) tap(g.y);
 await sleep(200);
 r.gapsAfter = gaps().map((g) => (g.split ? "|" : ".")).join("");
+r.systemsAfter = [$("fix-systems").textContent, redLines()];
 r.wanted = gaps().map((g) => (inside(g.y) ? "." : "|")).join("");
 await shot(false);
 $("fix-done").click();
