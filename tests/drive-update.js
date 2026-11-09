@@ -23,11 +23,11 @@ await waitFor(() => !$("update-banner").hidden, 10000, "update banner");
 r.bannerOnNewVersion = true;
 // Later, then the banner again (checks continue), then Update: offered is
 // counted once for this opening.
-$("update-later").click();
+stub(); $("update-later").click();
 await sleep(62000);
 stub(); f.contentDocument.dispatchEvent(new Event("visibilitychange"));
 await waitFor(() => !$("update-banner").hidden, 10000, "update banner again");
-$("update-now").click();
+stub(); $("update-now").click(); $("update-now").click(); // a double tap counts once
 await sleep(500);
 await waitFor(() => $("about-version") && f.contentWindow.document.readyState === "complete", 20000, "reloaded");
 await sleep(1000);
