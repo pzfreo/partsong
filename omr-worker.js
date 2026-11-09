@@ -470,8 +470,11 @@ const squeeze = async (bytes, fmt, Stream) => new Uint8Array(await new Response(
 // One reader instance for every page, the last page closed before the next
 // opens, so its memory is reused: with a fresh instance per page, the old one
 // (~140 MB) waited for Safari to free it while the next page opened on top
-// (iPhone simulator, sample: about 1 GB for a moment on each page). After a
-// failure the instance is dropped, so it can't leave state behind.
+// (iPhone simulator, sample: about 1 GB for a moment on each page). The page
+// is closed again once read, so its data isn't kept while the score plays.
+// An error the reader reports (e.g. no music on a cover page) leaves it
+// usable; only a trap (WebAssembly.RuntimeError) drops it, as its state may
+// be broken. Requests come one at a time (app.js awaits each).
 let pageReader = null;
 async function openPage(imageBytes, systemsJson, packed) {
   const rs = (pageReader ??= (await WebAssembly.instantiate(wasmModule, {})).exports);
@@ -548,7 +551,9 @@ async function layout(imageBytes, systemsJson) {
   const t1 = performance.now();
   rs.page_layout();
   const t2 = performance.now();
-  const out = { ...JSON.parse(message()), classes: await squeeze(classes, "deflate", CompressionStream) };
+  const systems = JSON.parse(message());
+  rs.page_close();
+  const out = { ...systems, classes: await squeeze(classes, "deflate", CompressionStream) };
   const t3 = performance.now();
   out.timing = `decode ${Math.round(open.decode)} ms, tiles ${Math.round(open.tiles)} ms, segnet+argmax ${Math.round(open.segnet)} ms, segment ${Math.round(open.segment)} ms, layout ${Math.round(t2 - t1)} ms, pack ${Math.round(t3 - t2)} ms (total open ${Math.round(t1 - t)})`;
   return out;
@@ -559,14 +564,17 @@ async function recognise(imageBytes, systemsJson, packed) {
   // and with the page's picture open as well that was the read's peak
   // (iPhone simulator, sample: 1.23 GB for a moment, now 0.99 GB; 0.79 GB
   // while reading).
-  // On iPhones and iPads (segnet on the CPU) the staff finder is let go first:
-  // its memory goes to the encoder (simulator, sample: about 50 MB less while
-  // reading); it's loaded again if another layout needs it.
-  if (IOS && sessionIds.has(MODELS[0])) {
+  // On iPhones and iPads (segnet on the CPU) the staff finder is let go first
+  // when the page's segmentation comes with it: its memory goes to the
+  // encoder (simulator, sample: about 50 MB less while reading); it's loaded
+  // again if another layout needs it. (Without it, as after a resume, segnet
+  // runs for each page, so it stays.)
+  if (IOS && packed && sessionIds.has(MODELS[0])) {
     const id = sessionIds.get(MODELS[0]);
     sessionIds.delete(MODELS[0]);
-    await sessions[id].release();
+    const old = sessions[id];
     sessions[id] = null;
+    await Promise.resolve().then(() => old.release()).catch(() => {}); // a failed release mustn't fail the read
   }
   const decoder = await rustDecoder();
   const encoder = exactEncoder ? null : await session(MODELS[1]);
@@ -575,7 +583,11 @@ async function recognise(imageBytes, systemsJson, packed) {
   let staff = 0;
   for (;;) {
     const state = rs.page_step();
-    if (state === 0) return message();
+    if (state === 0) {
+      const xml = message();
+      rs.page_close();
+      return xml;
+    }
     if (state < 0) throw new Error(message());
     if (staff === 0) post({ type: "log", msg: "Found the staffs" });
     post({ type: "log", msg: `Running TrOmr inference on staff image ${staff++}` });
@@ -610,7 +622,6 @@ async function init(noGpu, exact) {
   post({ type: "log", msg: `WASM threads: ${ort.env.wasm.numThreads}` });
   useGpu = !noGpu && !!(self.navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)));
   // Same deploy version as this worker (?v=… from scripts/stamp-version.mjs).
-  pageReader = null;
   wasmModule = await WebAssembly.compileStreaming(fetch("omr/partsong_omr.wasm" + location.search));
   for (const name of MODELS) {
     await downloadModel(name);
@@ -667,7 +678,7 @@ self.onmessage = async ({ data }) => {
       post({ type: "result", id: data.id, xml, ms });
     }
   } catch (e) {
-    pageReader = null;
+    if (e instanceof WebAssembly.RuntimeError) pageReader = null;
     post({ type: "error", id: data.id, msg: String(e && e.message ? e.message : e) });
   }
 };
