@@ -415,6 +415,7 @@ async function renderLibrary() {
   if (lib.length < SEARCH_FROM) $("library-search").value = "";
   releasePhotos("library");
   $("library-empty").hidden = lib.length > 0;
+  $("library-nothing").hidden = lib.length > 0;
   $("intro-more").hidden = lib.length > 0; // the explanation is for newcomers
   document.querySelector("#home .footer-sample").hidden = lib.length === 0; // the big button shows instead
   $("library").replaceChildren(

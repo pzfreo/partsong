@@ -114,13 +114,21 @@
     <section id="home">
       <div class="intro">
         <p class="tagline">Scan your choir music.<br>Hear just <span>your part</span>.</p>
-        <p id="intro-more" class="muted">Photograph your sheet music or open a PDF, choose soprano, alto, tenor or bass, and Partsong plays your line with the others softer while the score follows along. Free, works offline, and your music stays on your phone.</p>
+        <p id="intro-more" class="muted">Photograph your music or open a PDF, pick your part, and Partsong plays it with the others softer as the score follows along. Free, and your music stays on your phone.</p>
       </div>
       <div class="actions">
         <button id="new-scan" class="primary">Scan music</button>
         <label class="button">Open PDF<input id="open-xml" type="file" accept=".pdf,application/pdf,.html,text/html,.musicxml,.xml,application/vnd.recordare.musicxml+xml" multiple hidden></label>
       </div>
-      <p class="muted beta-note">Partsong is new and still in beta, so it won't read every score perfectly yet. If something goes wrong, please <button class="link report-open">report a problem</button>: it really helps us improve it.</p>
+      <!-- For newcomers (no scores yet): the sample and the video, up where they're seen. -->
+      <div id="library-empty" class="newcomer">
+        <p class="muted">New here?</p>
+        <div class="actions">
+          <button class="try-sample">Try a sample</button>
+          <a class="button" href="learn-your-choir-part.html#video">Watch a video</a>
+        </div>
+      </div>
+      <p class="muted beta-note">Partsong is in beta and won't read every score perfectly yet. If something goes wrong, please <button class="link report-open">report a problem</button>.</p>
       <h2>Your scores</h2>
       <div id="install-card" class="install-card" hidden>
         <p><strong>Install Partsong</strong>: it opens like an app, straight from your home screen, and works offline.</p>
@@ -140,12 +148,7 @@
       <input id="library-search" class="library-search" type="search" placeholder="Search your scores" aria-label="Search your scores" autocomplete="off" hidden>
       <ul id="library" class="library"></ul>
       <p id="library-none" class="muted" hidden>No scores match.</p>
-      <div id="library-empty">
-        <p class="muted">Nothing scanned yet.</p>
-        <p class="muted sample-blurb">Or try it out with a sample: Tallis's <em>If ye love me</em>, three pages for four voices.</p>
-        <button class="primary try-sample">Try a sample score</button>
-        <p class="muted"><a href="learn-your-choir-part.html#video">Watch a 1½-minute video</a> of how it works.</p>
-      </div>
+      <p id="library-nothing" class="muted">Nothing scanned yet.</p>
       <p class="report-link"><span class="footer-sample"><button class="link try-sample">Try a sample score</button> · </span><button class="link report-open">Report a problem</button> · <button class="link about-open">About</button> · <a href="learn-your-choir-part.html">How it works</a> · <a href="faq.html">Questions</a> · <a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a></p>
     </section>
 
