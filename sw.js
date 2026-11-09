@@ -11,6 +11,8 @@ const SHELL_FILES = [
   "index.html",
   "app.js",
   "score.js",
+  "lyrics.js",
+  "recognition-diagnostics.js",
   "player.js",
   "db.js",
   "orient.js",

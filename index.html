@@ -185,11 +185,30 @@
       <p id="share-status" class="muted share-status" aria-live="polite"></p>
 
       <div id="follow" class="follow" hidden>
+        <label class="check"><input id="only-my-part" type="checkbox"> Show only my part</label>
         <p id="tap-hint" class="muted">Tap a bar to start from there.</p>
         <div id="photo-list" class="photo-list"></div>
+        <div id="part-strips" class="photo-list part-strips" hidden></div>
       </div>
 
       <div id="read-view" class="read-view" hidden>
+        <button id="export-read-pdf" disabled>Export this view as PDF</button>
+        <h1 id="print-score-title" class="print-score-title"></h1>
+        <label class="check"><input id="read-only-part" type="checkbox"> Show only my selected part</label>
+        <p id="read-only-hint" class="hint" hidden>Shows the selected source staff and voice while preserving the original notation.</p>
+        <label class="check"><input id="recognized-part" type="checkbox"> Add recognized lyrics to my part (experimental)</label>
+        <div id="recognition-tools" hidden>
+          <p class="hint">Reads printed lyrics locally. First use downloads OCR files. Check the words and note alignment before practising.</p>
+          <label>Lyric language <select id="lyric-language"><option value="eng">English / Latin letters</option><option value="tam">Tamil / தமிழ்</option></select></label>
+          <label>Lyrics printed <select id="lyric-position"><option value="auto">Automatic: shared or separate lyrics</option><option value="below">Below the staff</option><option value="above">Above the staff</option><option value="both">Above and below (separate verses)</option></select></label>
+          <button id="recognize-lyrics">Recognize lyrics</button>
+          <button id="cancel-lyrics" hidden>Cancel</button>
+          <p id="lyric-status" role="status"></p>
+          <details><summary>Review and correct lyrics</summary>
+            <div id="lyric-editor"></div>
+            <button id="apply-lyrics" hidden>Apply corrections</button>
+          </details>
+        </div>
         <p class="muted">The music as the app read it. Wrong notes here are recognition errors.</p>
         <div id="osmd"></div>
       </div>
@@ -264,7 +283,7 @@
             </select>
           </label>
           <label><span>Tempo <output id="tempo-val"></output> &#9833;/min</span>
-            <input id="tempo" type="range" min="30" max="180" value="80">
+            <input id="tempo" type="range" min="30" max="300" value="80">
           </label>
           <div class="bars">
             <label>From bar <input id="from-bar" type="number" min="1" value="1" inputmode="numeric"></label>

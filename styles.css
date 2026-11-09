@@ -297,6 +297,35 @@ input[type="radio"], input[type="checkbox"] { width: 20px; height: 20px; accent-
 .grab { width: 44px; height: 5px; border-radius: 3px; background: var(--border); }
 .panel-close { position: absolute; right: 12px; min-height: 34px; padding: 0 14px; font-weight: 600; color: var(--accent); }
 .panel-backdrop { position: fixed; inset: 0; z-index: 1; background: rgb(0 0 0 / 0.18); }
+/* Wide screens keep the score usable beside the settings. */
+@media (min-width: 1000px) {
+  :root { --panel-w: 35%; }
+  main:has(#practice:not([hidden])) {
+    width: 100%;
+    max-width: none;
+  }
+  main:has(#practice:not([hidden]) #panel:not([hidden])) {
+    width: calc(100% - var(--panel-w));
+    margin-left: 0;
+    margin-right: var(--panel-w);
+  }
+  .panel {
+    top: 0;
+    left: auto;
+    width: var(--panel-w);
+    max-height: none;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.12);
+    transform: translateX(0);
+  }
+  .panel[hidden] { transform: translateX(110%); }
+  .panel > * { max-width: none; }
+  .panel-head { cursor: default; touch-action: auto; }
+  .panel-head .grab { display: none; }
+  .panel-backdrop { display: none; }
+}
 .error-toast { position: fixed; top: 64px; left: 12px; right: 12px; z-index: 10; padding: 10px 14px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 0.9rem; box-shadow: 0 6px 18px rgb(0 0 0 / 0.25); }
 .title-row { display: flex; align-items: center; gap: 4px; }
 .title-row .title-wrap { flex: 1; min-width: 0; }
@@ -376,7 +405,7 @@ header a.icon-btn { color: inherit; text-decoration: none; display: inline-flex;
 /* Ready to share at once (no preparing): filled, with a tick. */
 .row2 button.ready { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .row2 button.ready::before { content: "✓\00a0"; }
-.bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+.bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
 .lock-box { flex: 1; display: flex; align-items: center; gap: 10px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .lock-box .check { flex: 1; }
 .panel .bottom .danger { margin: 0; }
@@ -390,13 +419,31 @@ details { margin-top: 24px; }
 .view-toggle.on-read .i-pages { display: block; }
 .follow { margin-top: 12px; }
 .read-view { margin-top: 12px; }
+#lyric-editor label { display: block; margin: 12px 0; }
+#lyric-editor textarea { display: block; width: 100%; min-height: 70px; margin-top: 6px; font: inherit; padding: 8px; }
+.print-score-title { display: none; }
+@media print {
+  @page { size: A4 portrait; margin: 12mm; }
+  html, body { background: white !important; color: black !important; }
+  body > :not(main), main > :not(#practice),
+  #practice > :not(#read-view), #read-view > :not(#osmd):not(.print-score-title) { display: none !important; }
+  main, main:has(#practice:not([hidden])),
+  main:has(#practice:not([hidden]) #panel:not([hidden])) {
+    width: 100%; max-width: none; margin: 0; padding: 0;
+  }
+  #practice, .read-view { margin: 0; padding: 0; }
+  .print-score-title { display: block; margin: 0 0 8mm; font-size: 16pt; overflow-wrap: anywhere; }
+  .read-bar, .read-playhead { display: none !important; }
+  .read-page { break-inside: avoid; margin: 0 0 8mm; }
+  .read-page svg { max-width: 100%; height: auto; }
+}
 .read-view .muted { margin: 0 0 8px; }
 .read-page { position: relative; cursor: pointer; }
 .read-page.read-failed { cursor: default; padding: 16px 0; }
 .read-bar, .read-playhead { position: absolute; pointer-events: none; }
 .read-bar[hidden], .read-playhead[hidden] { display: none; }
 .read-bar { background: color-mix(in srgb, var(--accent) 10%, transparent); border: 2px solid var(--accent); border-radius: 4px; }
-.read-playhead { background: var(--gold); border-radius: 2px; }
+.read-playhead { background: var(--gold); border-radius: 2px; will-change: transform; }
 .photo-list { display: grid; gap: 8px; }
 .photo-list .page { position: relative; }
 .photo-list .page-label { display: none; }
@@ -414,6 +461,8 @@ body.fixing .photo-list .page-label { display: block; margin: 0; font-weight: 70
 body.fixing .photo-list .page + .page-label { margin-top: 8px; padding-top: 12px; border-top: 6px solid #e2432d; }
 .photo-list img { width: 100%; display: block; border-radius: 8px; border: 1px solid var(--border); }
 .photo-list svg { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+.part-strips { background: white; padding: 16px 0; gap: 24px; border-radius: 8px; overflow: hidden; }
+.part-strips svg { position: static; height: auto; display: block; background: white; border-radius: 0; }
 /* The music is one big tap target: no tap flash, no long-press selection. */
 .photo-list, .read-page { -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .photo-list .bar { fill: var(--accent); fill-opacity: 0.12; stroke: var(--accent); stroke-width: 6; }

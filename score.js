@@ -48,6 +48,7 @@ export function parsePage(xmlText, { restaff = true } = {}) {
     let staves = 1;
     let timeLength = 4;
     let clef = null; // the top staff's first clef sign (G, F, C)
+    const clefShifts = new Map();
     const measures = [...part.children].filter((m) => m.tagName === "measure").map((measure) => {
       const notes = [];
       let pos = 0;
@@ -59,6 +60,9 @@ export function parsePage(xmlText, { restaff = true } = {}) {
           staves = Math.max(staves, num(el, "staves", staves));
           const c = el.querySelector('clef[number="1"], clef:not([number])');
           clef ??= c?.querySelector("sign")?.textContent ?? null;
+          for (const writtenClef of el.querySelectorAll("clef")) {
+            clefShifts.set(Number(writtenClef.getAttribute("number") ?? 1), num(writtenClef, "clef-octave-change", 0) * 12);
+          }
           const time = el.querySelector("time");
           if (time) timeLength = (num(time, "beats", 4) * 4) / num(time, "beat-type", 4);
         } else if (el.tagName === "backup") {
@@ -81,7 +85,7 @@ export function parsePage(xmlText, { restaff = true } = {}) {
             staff: num(el, "staff", 1),
             voice: el.querySelector("voice")?.textContent || "1",
             midi: pitch
-              ? 12 * (num(pitch, "octave") + 1) + STEPS[pitch.querySelector("step").textContent] + num(pitch, "alter")
+              ? 12 * (num(pitch, "octave") + 1) + STEPS[pitch.querySelector("step").textContent] + num(pitch, "alter") + (clefShifts.get(num(el, "staff", 1)) ?? 0)
               : null,
             step: pitch ? 7 * num(pitch, "octave") + "CDEFGAB".indexOf(pitch.querySelector("step").textContent) : null,
             tieStart: !!el.querySelector('tie[type="start"]'),
@@ -95,7 +99,8 @@ export function parsePage(xmlText, { restaff = true } = {}) {
       }
       // The reader marks the first bar of each new line of music.
       const newSystem = !!measure.querySelector('print[new-system="yes"]');
-      return { notes, length: maxPos || timeLength, meter: timeLength, newSystem, ...repeatMarks(measure) };
+      const multipleRest = Math.max(1, num(measure, "multiple-rest", 1));
+      return { notes, length: multipleRest > 1 ? timeLength * multipleRest : maxPos || timeLength, multipleRest, meter: timeLength, newSystem, ...repeatMarks(measure) };
     });
     // A pair of staves the reader took for a piano's (braced) can come out as
     // one staff, both clefs on it (homr keeps the lower staff only if it finds
@@ -123,7 +128,7 @@ export function parsePage(xmlText, { restaff = true } = {}) {
       if (lowers.size) [staves, restaffed] = [2, true];
     }
     for (let staff = 1; staff <= staves; staff++) placeNoteheads(measures, staff);
-    return { staves, measures, clef, restaffed };
+    return { staves, measures, clef, clefShift: clefShifts.get(1) ?? 0, restaffed };
   });
   return { title, parts };
 }
@@ -214,6 +219,19 @@ function splitStaff(notes) {
     const second = notes.filter((n) => n.tag.endsWith("2"));
     const first = notes.filter((n) => !n.tag.endsWith("2"));
     if (!second.length && !notes.some((n) => n.staffKey)) return { high: pickFromChords(first, true), low: pickFromChords(first, false) };
+    // A shared unison can lose one voice tag (e.g. "es" before a doubled
+    // "et"). Recover it only when both voices continue at the same pitch,
+    // and the missing voice has neither a note nor an explicit rest there.
+    const missingUnisons = (source, target) => source.filter((n) =>
+      n.midi != null &&
+      target.some((next) => next.midi === n.midi && Math.abs(next.start - n.start - n.dur) < 1e-6) &&
+      source.some((next) => next.midi === n.midi && Math.abs(next.start - n.start - n.dur) < 1e-6) &&
+      !target.some((other) => other.start < n.start + n.dur - 1e-6 && other.start + other.dur > n.start + 1e-6),
+    );
+    const addFirst = missingUnisons(second, first);
+    const addSecond = missingUnisons(first, second);
+    first.push(...addFirst);
+    second.push(...addSecond);
     return { high: pickFromChords(first, true), low: pickFromChords(second, false) };
   }
   return splitByPitch(notes);
@@ -327,7 +345,7 @@ function foldSplitChoir(page) {
       (v.measures[i]?.notes ?? []).map((n) => ({
         ...n,
         // A tenor in treble clef is the octave-lower treble clef (see below).
-        midi: k === 2 && v.clef === "G" && n.midi != null ? n.midi - 12 : n.midi,
+        midi: k === 2 && v.clef === "G" && !v.clefShift && n.midi != null ? n.midi - 12 : n.midi,
         staff: k < 2 ? 1 : 2,
         tag: k % 2 ? "upper2" : "upper",
         staffKey: `split${k}`,
@@ -387,7 +405,7 @@ function alignBarsWholePage(page) {
     if (extra <= 0) continue;
     const ms = part.measures;
     part.measures = ms.filter((m, i) => {
-      if (m.notes.length || extra <= 0) return true;
+      if (m.notes.length || m.multipleRest > 1 || extra <= 0) return true;
       extra--;
       carryMarks(m, ms.slice(0, i).findLast((x) => x.notes.length), ms.slice(i + 1).find((x) => x.notes.length));
       return false;
@@ -524,6 +542,7 @@ export function buildScore(pages, { legacyAlign = false } = {}) {
       const info = partInfo.get(part.key) ?? { key: part.key, staves: part.staves, order: [], clef: part.clef };
       info.staves = Math.max(info.staves, part.staves);
       info.restaffed ||= !!part.restaffed;
+      info.clefShift ??= part.clefShift;
       info.order.push(idx / Math.max(1, page.parts.length - 1));
       partInfo.set(part.key, info);
     });
@@ -682,7 +701,7 @@ export function buildScore(pages, { legacyAlign = false } = {}) {
         const line = { ...b.partLines[0], label: names[singing.indexOf(b)], fixedLabel: true };
         // A tenor part in treble clef is always the octave-lower treble clef,
         // whose little 8 the reader doesn't report.
-        if (line.label === "Tenor" && b.info.clef === "G") line.notes = line.notes.map((n) => ({ ...n, midi: n.midi - 12 }));
+        if (line.label === "Tenor" && b.info.clef === "G" && !b.info.clefShift) line.notes = line.notes.map((n) => ({ ...n, midi: n.midi - 12 }));
         lines.push(line);
       }
       else if (piano.includes(b)) {
