@@ -218,10 +218,16 @@ function splitStaff(notes) {
     // in one voice, even in a bar where the other voice has notes of its own
     // elsewhere: the chord's other end belongs to the other line, unless that
     // line is already sounding.
+    // Only two-note chords (two voices on one stem, not a piano's block
+    // chords), and only when the other voice has notes of its own in the bar
+    // (not where it sits out, as in a split choir's empty staff).
     const shared = (from, other, pickHigh) =>
-      pickFromChords(from, pickHigh).filter(
-        (n) => from.some((m) => m.start === n.start && m.midi != null && m.midi !== n.midi) && !sounding(other, n.start),
-      );
+      !other.some((n) => n.midi != null)
+        ? []
+        : pickFromChords(from, pickHigh).filter((n) => {
+            const chord = new Set(from.filter((m) => m.start === n.start && m.midi != null).map((m) => m.midi));
+            return chord.size === 2 && !soundsAt(other, n.start);
+          });
     return {
       high: sortByStart([...pickFromChords(first, true), ...shared(second, first, true)]),
       low: sortByStart([...pickFromChords(second, false), ...shared(first, second, false)]),
@@ -230,7 +236,7 @@ function splitStaff(notes) {
   return splitByPitch(notes);
 }
 
-const sounding = (notes, t) => notes.some((n) => n.start <= t + 1e-6 && t < n.start + n.dur - 1e-6);
+const soundsAt = (notes, t) => notes.some((n) => n.start <= t + 1e-6 && t < n.start + n.dur - 1e-6);
 const sortByStart = (notes) => notes.sort((a, b) => a.start - b.start);
 
 // One onset group -> a single note: top for the upper line, bottom for lower.
@@ -500,26 +506,32 @@ function markRepeats(measures) {
 export function playOrder(measures, from, to, targets = {}) {
   const order = [];
   const taken = new Set();
-  let pass = 1;
+  // Starting inside a 2nd-time ending plays it (as the second time through).
+  const startEnding = measures[from]?.ending;
+  let pass = startEnding && !startEnding.includes(1) ? startEnding[0] : 1;
   let jumpedAt = -1;
   let secondPlayed = false;
+  let hadFirst = pass > 1;
   for (let i = from; i <= to && order.length < 10 * measures.length; ) {
     const m = measures[i];
-    // The second time through lasts until its 2nd-time ending has been played
-    // (a bar read between the endings mustn't end it, or the 2nd-time ending
-    // would be skipped), or a new repeat or set of endings starts.
-    if (pass === 2 && i > jumpedAt && (m.repeatForward || m.endingStart?.includes(1) || (!m.ending && secondPlayed))) pass = 1;
+    // After a repeat with a 1st-time ending, the second time through lasts
+    // until the 2nd-time ending has been played (a bar read between the
+    // endings mustn't end it, or the 2nd-time ending would be skipped), or a
+    // new repeat or set of endings starts. Without one, it ends at the first
+    // bar past the repeat sign.
+    if (pass > 1 && i > jumpedAt && (m.repeatForward || m.endingStart?.includes(1) || (!m.ending && (secondPlayed || !hadFirst)))) pass = 1;
     if (m.ending && !m.ending.includes(pass)) {
       i++;
       continue;
     }
     order.push(i);
-    if (pass === 2 && i > jumpedAt && m.ending) secondPlayed = true;
+    if (pass > 1 && i > jumpedAt && m.ending) secondPlayed = true;
     if (m.repeatBackward && !taken.has(i)) {
       taken.add(i);
       pass = 2;
       jumpedAt = i;
       secondPlayed = false;
+      hadFirst = !!m.ending;
       i = Math.min(i, Math.max(from, targets[i] ?? m.repeatTo ?? 0));
       continue;
     }

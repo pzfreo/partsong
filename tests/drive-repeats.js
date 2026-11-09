@@ -61,5 +61,15 @@ const tail = (pages) => { const sc = buildScore(pages.map((x) => parsePage(x)));
 r.noel = tail(noel);
 r.noelNoStop = tail(noel.map((x) => x.replace(/<ending type="stop"[^>]*>|<ending type="start" number="2"[^>]*>/g, "")));
 const noelWant = "61 62 63 64 65 66 67 68 61 62 63 64 65 66 67 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83";
-r.noelOk = r.noel === noelWant && r.noelNoStop === noelWant;
+const range = (pages, a, b) => { const sc = buildScore(pages.map((x) => parsePage(x))); return playOrder(sc.measures, a - 1, b - 1).map((i) => i + 1).join(" "); };
+// Playing just the 2nd ending (it used to play nothing), and from inside a
+// 2nd ending whose bracket end was missed (so it runs to the last bar).
+r.noel2nd = range(noel, 70, 72);
+r.noelFrom75 = range(noel.map((x) => x.replace(/<ending type="stop" number="2"[^>]*>/g, "")), 75, 83);
+// A plain repeat (no endings) ends the second time through at the next bar,
+// as before: a later 2nd-ending-only bar is still skipped.
+const bar = (o = {}) => ({ endingStart: [], ...o });
+const plain = [bar(), bar(), bar({ repeatBackward: true, repeatTo: 0 }), bar(), bar({ ending: [2] }), bar()];
+r.plain = playOrder(plain, 0, 5).join(" ");
+r.noelOk = r.noel === noelWant && r.noelNoStop === noelWant && r.noel2nd === "70 71 72" && r.noelFrom75 === "75 76 77 78 79 80 81 82 83" && r.plain === "0 1 2 0 1 2 3 5";
 window.result = r;
