@@ -465,12 +465,17 @@ async function pixels(bytes) {
 // Deflated (a page's class maps are mostly background: a few MB to tens of KB).
 const squeeze = async (bytes, fmt, Stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new Stream(fmt))).arrayBuffer());
 
-// A fresh reader instance with the page open and its staffs found. classes:
-// the page's segmentation from an earlier layout (deflated), else segnet runs.
+// The reader with the page open and its staffs found. classes: the page's
+// segmentation from an earlier layout (deflated), else segnet runs.
+// One reader instance for every page, the last page closed before the next
+// opens, so its memory is reused: with a fresh instance per page, the old one
+// (~140 MB) waited for Safari to free it while the next page opened on top
+// (iPhone simulator, sample: about 1 GB for a moment on each page). After a
+// failure the instance is dropped, so it can't leave state behind.
+let pageReader = null;
 async function openPage(imageBytes, systemsJson, packed) {
-  // A fresh instance per page: its memory is returned afterwards (WebAssembly
-  // memory never shrinks), and a failure can't leave state behind.
-  const { exports: rs } = await WebAssembly.instantiate(wasmModule, {});
+  const rs = (pageReader ??= (await WebAssembly.instantiate(wasmModule, {})).exports);
+  rs.page_close();
   const mem = () => rs.memory.buffer;
   const copyIn = (typed) => {
     const p = rs.alloc(typed.byteLength);
@@ -554,6 +559,15 @@ async function recognise(imageBytes, systemsJson, packed) {
   // and with the page's picture open as well that was the read's peak
   // (iPhone simulator, sample: 1.23 GB for a moment, now 0.99 GB; 0.79 GB
   // while reading).
+  // On iPhones and iPads (segnet on the CPU) the staff finder is let go first:
+  // its memory goes to the encoder (simulator, sample: about 50 MB less while
+  // reading); it's loaded again if another layout needs it.
+  if (IOS && sessionIds.has(MODELS[0])) {
+    const id = sessionIds.get(MODELS[0]);
+    sessionIds.delete(MODELS[0]);
+    await sessions[id].release();
+    sessions[id] = null;
+  }
   const decoder = await rustDecoder();
   const encoder = exactEncoder ? null : await session(MODELS[1]);
   const { rs, mem, copyIn, message } = await openPage(imageBytes, systemsJson, packed);
@@ -596,6 +610,7 @@ async function init(noGpu, exact) {
   post({ type: "log", msg: `WASM threads: ${ort.env.wasm.numThreads}` });
   useGpu = !noGpu && !!(self.navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)));
   // Same deploy version as this worker (?v=… from scripts/stamp-version.mjs).
+  pageReader = null;
   wasmModule = await WebAssembly.compileStreaming(fetch("omr/partsong_omr.wasm" + location.search));
   for (const name of MODELS) {
     await downloadModel(name);
@@ -652,6 +667,7 @@ self.onmessage = async ({ data }) => {
       post({ type: "result", id: data.id, xml, ms });
     }
   } catch (e) {
+    pageReader = null;
     post({ type: "error", id: data.id, msg: String(e && e.message ? e.message : e) });
   }
 };

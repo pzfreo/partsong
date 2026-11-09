@@ -301,6 +301,17 @@ pub unsafe extern "C" fn page_segment(classes: *const u8) -> i32 {
     })
 }
 
+/// Drops the open page, so the next page_open reuses its memory in the same
+/// instance (WebAssembly memory never shrinks; with a fresh instance per page,
+/// the old one waited for Safari to free it, and the next page's opening went
+/// on top of it: about 1 GB for a moment on the iPhone simulator, 0.75 GB with
+/// this).
+#[no_mangle]
+pub extern "C" fn page_close() {
+    PAGE.with(|p| *p.borrow_mut() = None);
+    BUF.with(|b| *b.borrow_mut() = Vec::new());
+}
+
 /// After page_segment: the page's systems (Page::layout) in msg.
 #[no_mangle]
 pub extern "C" fn page_layout() -> usize {
