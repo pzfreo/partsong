@@ -153,13 +153,26 @@ const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 async function newSession(id) {
   const name = sessionNames[id];
   const gpu = useGpu && GPU_MODELS.has(name) && !(IOS && name === MODELS[0]);
-  const eps = gpu ? ["webgpu", "wasm"] : ["wasm"];
+  let eps = gpu ? ["webgpu", "wasm"] : ["wasm"];
   const t0 = performance.now();
-  const session = await ort.InferenceSession.create(await modelBytes(name), {
-    executionProviders: eps,
-    graphOptimizationLevel: "all",
-  });
-  if (gpu) onGpu.add(id);
+  const bytes = await modelBytes(name);
+  const create = () => ort.InferenceSession.create(bytes, { executionProviders: eps, graphOptimizationLevel: "all" });
+  let session;
+  try {
+    session = await create();
+  } catch (e) {
+    // A GPU that has gone (e.g. a phone's, under memory pressure) can fail
+    // onnxruntime's WebGPU setup too ("Cannot read properties of undefined
+    // (reading 'destroy')"), and that leaves it unable to set up another
+    // WebGPU session ("another WebGPU EP inference session is being created";
+    // Android, v238): carry on without the GPU, as run() does.
+    if (!gpu) throw e;
+    post({ type: "log", msg: `WebGPU setup failed (${e.message}); using WASM from now on` });
+    useGpu = false;
+    eps = ["wasm"];
+    session = await create();
+  }
+  if (eps[0] === "webgpu") onGpu.add(id);
   else onGpu.delete(id);
   post({ type: "log", msg: `Loaded ${name} on ${eps[0]} in ${Math.round(performance.now() - t0)} ms` });
   return session;
@@ -188,7 +201,9 @@ async function run(id, feeds, names) {
     useGpu = false;
     for (const other of [...onGpu]) {
       const old = sessions[other];
-      Promise.resolve().then(() => old.release()).catch(() => {});
+      // Released before the next is made: onnxruntime sets up one session at
+      // a time. (A failed release mustn't fail the read.)
+      await Promise.resolve().then(() => old.release()).catch(() => {});
       sessions[other] = await newSession(other);
     }
     out = await sessions[id].run(feeds, names);
