@@ -26,5 +26,16 @@ r.roseSplit = rose.lines.filter((l) => l.voice === "lower").length;
 // lower line, so it can be marked staff by staff. It stays its own part, with
 // plain names (it could as well be singers), rather than joining the piano.
 r.rose16 = rose.lines.filter((l) => /^Part 1\.6 /.test(l.label)).map((l) => `${l.staffKey} ${l.voice}`).join(",");
-r.ok = r.pontio.length === 5 && r.roseSplit === 10 && r.rose16 === "1#6/1 upper,1#6/1 lower,1#6/2 upper,1#6/2 lower" && !rose.lines.some((l) => l.label === "Soprano");
+// Christ Is King: where soprano and alto share a stem, the reader writes them
+// as a chord in the soprano's voice, in bars where the alto also has notes of
+// its own. The alto (lower) line keeps the chord's bottom note: bar 22 starts
+// with the alto's E flat (it used to be silent until beat 3).
+const { readScoreFile } = await import("/share.js");
+const cikEntry = await readScoreFile(new File([await (await fetch("/testdata/corpus/cik.partsong.pdf")).blob()], "cik.partsong.pdf"));
+const cik = buildScore(cikEntry.pages.map(parsePage));
+const bar = (n, line) => { const m = cik.measures[n - 1]; return line.notes.filter((x) => x.t >= m.start - 1e-6 && x.t < m.start + m.length - 1e-6).map((x) => `${x.midi}@${x.t - m.start}`).join(" "); };
+const alto = cik.lines.find((l) => l.label === "Alto" && l.staffKey === "2#0/1");
+r.cik22 = bar(22, alto);
+r.ok = r.pontio.length === 5 && r.roseSplit === 10 && r.rose16 === "1#6/1 upper,1#6/1 lower,1#6/2 upper,1#6/2 lower" && !rose.lines.some((l) => l.label === "Soprano")
+  && r.cik22 === "63@0 67@2 68@2.5";
 window.result = r;

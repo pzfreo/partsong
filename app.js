@@ -1335,6 +1335,9 @@ async function readScan() {
   }
   const entry = scanEntry(false);
   if (readSeconds) entry.readSeconds = readSeconds;
+  // Which Partsong read it, on what: goes with the score when it's shared, so
+  // a problem report says what read the music.
+  entry.readBy = { version: SHOWN_VERSION, device: deviceKind, browser: ua, at: Date.now() };
   saved = await db.put(entry).then(() => true, () => false);
   if (!saved) setPageStatus("Read OK, but couldn't save it on this phone (storage full?).");
   scanId = null;
