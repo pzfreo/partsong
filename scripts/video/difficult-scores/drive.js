@@ -56,7 +56,8 @@ await voStart("mark", "Tap your staff in each line of music.", "Here, the alto."
 for (const y of [175, 375, 641, 835]) await tapPage("#photo-list", 0, 0.35, y / 990, 1.8);
 await voWait();
 await voStart("shared", "Where two voices share a staff:", "tap once for the upper voice, twice for the lower.", "top");
-for (const y of [75, 222, 318, 485]) { await tapPage("#photo-list", 1, 0.35, y / 990, 1.8); await sleep(250); await tapPage("#photo-list", 1, 0.35, y / 990, 1.8); }
+// Zoomed on the right-hand end, where the mark's "upper voice"/"lower voice" label shows.
+for (const y of [75, 222, 318, 485]) { await tapPage("#photo-list", 1, 0.92, y / 990, 1.8); await sleep(700); await tapPage("#photo-list", 1, 0.92, y / 990, 1.8); await sleep(700); }
 await voWait();
 await zoomOut();
 await hush();
