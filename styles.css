@@ -226,6 +226,7 @@ select { min-height: 40px; font: inherit; padding: 0 8px; border: 1px solid var(
 .lines li.mine { background: var(--mine); border-color: var(--gold); }
 .lines .pick { flex: 1; display: flex; align-items: center; gap: 10px; font-weight: 500; min-height: 32px; }
 .lines .range { color: var(--muted); font-size: 0.85rem; font-weight: 400; }
+.lines .hint-name { color: var(--muted); font-style: italic; font-weight: 400; margin-left: -4px; }
 .lines .include { font-size: 0.85rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
 input[type="radio"], input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent); }
 

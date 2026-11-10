@@ -542,7 +542,7 @@ export function playOrder(measures, from, to, targets = {}) {
 
 // pages: array of parsePage() results, in page order. legacyAlign: bars lined
 // up across parts page by page, as before layout 2 (LAYOUT in app.js).
-export function buildScore(pages, { legacyAlign = false, byVoice = true } = {}) {
+export function buildScore(pages, { legacyAlign = false, numbers = true } = {}) {
   pages.forEach((page) => alignBars(page, legacyAlign));
   pages.forEach(foldSplitChoir);
   // Match parts across pages by staff layout: the k-th 2-staff part on each
@@ -735,43 +735,118 @@ export function buildScore(pages, { legacyAlign = false, byVoice = true } = {}) 
   }
   lines.forEach((l, i) => (l.id = i));
   let systems = findSystems(measures, lines, staffBoxes);
-  const voiced = byVoice && byVoiceOrder(lines, systems);
-  if (voiced) systems = findSystems(measures, voiced, staffBoxes, { scoped: true });
+  const numbered = numbers ? numberParts(lines, systems) : null;
+  if (numbered?.lines) systems = findSystems(measures, numbered.lines, staffBoxes, { scoped: true });
   barAreas(systems);
-  return { title: pages.find((p) => p.title)?.title || "", measures, lines: voiced || lines, systems, length: t };
+  return { title: pages.find((p) => p.title)?.title || "", measures, lines: numbered?.lines ?? lines, systems, length: t, numbered: numbered?.by ?? null, partsVary: !!numbered?.vary };
 }
 
-// A score whose layout changes (verses on two staves, the last on four; a
-// voice moving staff) is read as different parts on different pages, so
-// matching parts by staff layout mixes the voices up. But each system still
-// has its voices top to bottom (upper before lower on a shared staff): when
-// every system has the same number of voices, the k-th voice of each system is
-// one line. Scores whose systems already agree are left as they are.
-function byVoiceOrder(lines, systems) {
-  if (systems.length < 2 || lines.some((l) => l.accompaniment)) return null;
+// The parts, numbered from the top of the page. The reader doesn't read the
+// names printed on the music, so a number the singer can check ("I'm the
+// second staff") beats a guessed name; a name is only a hint ("soprano?").
+// Two ways to number, tried in turn:
+// - by staff: every system has the same staves (an SATB score, with or
+//   without piano). Two voices on a staff are its upper and lower lines (a
+//   divided soprano, piano chords).
+// - by voice: the staves change but every system has the same voices top to
+//   bottom, upper before lower on a shared staff (verses on four staves, the
+//   last on two).
+// Otherwise the parts vary from system to system: { vary: true }, and the
+// singer marks their part on the music instead of choosing from a list.
+function numberParts(lines, systems) {
+  if (!systems.length || systems.some((sys) => !sys.staves?.length)) return null;
   const rank = (id) => (lines[id].voice === "lower" ? 1 : 0);
-  const seqs = systems.map((sys) => sys.staves.flatMap((st) => [...st.lines].sort((a, b) => rank(a) - rank(b))));
-  const n = seqs[0].length;
-  if (n < 2 || n > 8 || seqs.some((q) => q.length !== n || new Set(q).size !== n)) return null;
-  if (seqs.every((q) => q.join() === seqs[0].join())) return null;
-  const out = [...Array(n)].map(() => ({ notes: [], voices: new Set(), staffKey: null }));
-  systems.forEach((sys, i) =>
-    seqs[i].forEach((id, k) => {
-      const from = lines[id];
-      // Each note keeps the staff it was read on, so marking still finds it.
-      out[k].notes.push(...from.notes.filter((x) => x.t >= sys.start && x.t < sys.end && x.pos?.page === sys.page).map((x) => ({ ...x, staffKey: x.staffKey ?? from.staffKey })));
-      out[k].voices.add(from.voice);
-      out[k].staffKey ??= from.staffKey;
-    }),
-  );
-  const names = n === 4 ? ["Soprano", "Alto", "Tenor", "Bass"] : null;
-  return out.map((o, k) => ({
-    id: k,
-    label: names ? names[k] : `Voice ${k + 1}`,
-    staffKey: o.staffKey,
-    voice: o.voices.has("lower") ? "lower" : o.voices.has("upper") ? "upper" : "only",
-    notes: o.notes.sort((a, b) => a.t - b.t),
-  }));
+  const notesIn = (id, sys, key) => lines[id].notes
+    .filter((x) => x.t >= sys.start && x.t < sys.end && x.pos?.page === sys.page && (key == null || (x.staffKey ?? lines[id].staffKey) === key))
+    .map((x) => ({ ...x, staffKey: x.staffKey ?? lines[id].staffKey }));
+  const build = (parts, hints) => {
+    const out = [];
+    parts.forEach((part, k) => {
+      const lower = part.lower.length > 0;
+      for (const [notes, voice, from] of lower ? [[part.main, "upper", part.fromMain], [part.lower, "lower", part.fromLower]] : [[part.main, "only", part.fromMain]]) {
+        if (!notes.length) continue;
+        // Piano: as the reader guessed it (most of its notes from a line it
+        // called accompaniment), or the hint.
+        const acc = from.acc * 2 > from.all;
+        // Else the name the reader gave the line most of its notes came from.
+        const named = [...from.names].sort((x, y) => y[1] - x[1])[0];
+        const guessed = named && named[1] * 2 > from.all ? named[0] : null;
+        const hint = acc || hints?.[k] === "Piano" ? "Piano" : hints?.[k]?.[voice === "lower" ? 1 : 0] ?? guessed;
+        out.push({
+          label: `Part ${k + 1}${voice === "only" ? "" : ` ${voice}`}`,
+          hint,
+          accompaniment: hint === "Piano" || undefined,
+          staffKey: part.staffKey,
+          voice,
+          notes: notes.sort((x, y) => x.t - y.t),
+        });
+      }
+    });
+    out.forEach((l, i) => (l.id = i));
+    return out;
+  };
+  const NAMES = new Set(["Solo", "Soprano", "Alto", "Tenor", "Bass", "Piano"]);
+  const nameOf = (line) => { const n = line.label.replace(/ \d+$/, ""); return NAMES.has(n) ? n : null; };
+  const part = () => ({ main: [], lower: [], fromMain: { acc: 0, all: 0, names: new Map() }, fromLower: { acc: 0, all: 0, names: new Map() }, staffKey: null });
+  const take = (p, which, id, notes) => {
+    p[which].push(...notes);
+    const from = which === "main" ? p.fromMain : p.fromLower;
+    from.all += notes.length;
+    if (lines[id].accompaniment) from.acc += notes.length;
+    const name = nameOf(lines[id]);
+    if (name) from.names.set(name, (from.names.get(name) ?? 0) + notes.length);
+    p.staffKey ??= lines[id].staffKey;
+  };
+  const SATB = ["Soprano", "Alto", "Tenor", "Bass"];
+  const hintsFor = (n) => (n === 4 ? SATB : n === 6 ? [...SATB, "Piano", "Piano"] : null)?.map((h) => (h === "Piano" ? h : [h, h]));
+
+  // By staff: every system has the same staves.
+  const n = systems[0].staves.length;
+  if (systems.every((sys) => sys.staves.length === n)) {
+    const parts = [...Array(n)].map(part);
+    for (const sys of systems) {
+      sys.staves.forEach((st, k) => {
+        const ids = [...st.lines].sort((x, y) => rank(x) - rank(y));
+        ids.forEach((id, v) => take(parts[k], v === 0 && !(ids.length === 1 && lines[id].voice === "lower") ? "main" : "lower", id, notesIn(id, sys, st.key)));
+      });
+    }
+    // Two staves of two voices each: a hymn's S+A and T+B.
+    const hymn = n === 2 && parts.every((p) => p.lower.length) ? [["Soprano", "Alto"], ["Tenor", "Bass"]] : null;
+    return { lines: build(parts, hymn ?? hintsFor(n)), by: "staff" };
+  }
+  // By voice.
+  const seqs = systems.map((sys) => sys.staves.flatMap((st) => [...st.lines].sort((x, y) => rank(x) - rank(y))));
+  const v = seqs[0].length;
+  if (v >= 1 && seqs.every((q) => q.length === v && new Set(q).size === v)) {
+    const parts = [...Array(v)].map(part);
+    systems.forEach((sys, i) => seqs[i].forEach((id, k) => take(parts[k], "main", id, notesIn(id, sys))));
+    return { lines: build(parts, hintsFor(v)), by: "voice" };
+  }
+  // Parts that sit out some systems (a solo staff on some pages): systems with
+  // the same staves have the same parts, and smaller systems only leave parts
+  // out. Then the parts are as matched, numbered by the fullest system.
+  const full = seqs.reduce((a, q) => (q.length > a.length ? q : a));
+  const byCount = new Map();
+  const sameAs = systems.every((sys, i) => {
+    const key = sys.staves.length;
+    if (!byCount.has(key)) byCount.set(key, seqs[i].join());
+    let at = 0;
+    return byCount.get(key) === seqs[i].join() && seqs[i].every((id) => (at = full.indexOf(id, at) + 1) > 0);
+  });
+  if (sameAs) {
+    const fullSys = systems[seqs.indexOf(full)];
+    const out = fullSys.staves.flatMap((st, k) => {
+      const ids = [...st.lines].sort((x, y) => rank(x) - rank(y));
+      return ids.map((id, j) => {
+        const from = lines[id];
+        const voice = ids.length > 1 ? (j === 0 ? "upper" : "lower") : from.voice;
+        return { ...from, label: `Part ${k + 1}${ids.length > 1 ? ` ${voice}` : ""}`, hint: nameOf(from), voice };
+      });
+    });
+    out.forEach((l, i) => (l.id = i));
+    return { lines: out, by: "parts" };
+  }
+  return { vary: true };
 }
 
 // Groups bars into systems (one row of music on a page): a new system starts

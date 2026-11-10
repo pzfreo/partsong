@@ -1815,8 +1815,8 @@ let score;
 // lined up system by system, which can drop a misread extra bar or system).
 // Layout 3: a pair of staves read as one goes back on two, which can change
 // the parts, so the saved part choices (line ids) move to the same music.
-// Layout 4: a score whose layout changes, with the same voices in every
-// system, has one line per voice (score.js byVoiceOrder): the same again.
+// Layout 4: the parts are numbered from the top, by staff or by voice
+// (score.js numberParts), which can merge and reorder them: the same again.
 const LAYOUT = 4;
 function migrateLayout(entry) {
   const was = entry.layout ?? 1;
@@ -1849,7 +1849,7 @@ function migrateLayout(entry) {
 function moveLines(entry, was) {
   const used = entry.mine != null || entry.excluded?.length || Object.keys(entry.manual ?? {}).length;
   if (!used) return;
-  const old = buildScore(entry.pages.map((x) => parsePage(x, { restaff: was >= 3 })), { byVoice: false });
+  const old = buildScore(entry.pages.map((x) => parsePage(x, { restaff: was >= 3 })), { numbers: false });
   const sig = (s) => JSON.stringify(s.lines.map((l) => [l.label, l.staffKey, l.voice, l.notes.length]));
   if (sig(old) === sig(score)) return;
   const notes = score.lines.map((l) => new Set(l.notes.map((n) => `${n.t}:${n.midi}`)));
@@ -1935,8 +1935,7 @@ function openScore(entry, nav = "push") {
   $("from-bar").max = $("to-bar").max = score.measures.length;
   $("tempo").value = entry.tempo ?? 80;
   $("others").value = entry.others ?? 25;
-  const soprano = score.lines.findIndex((l) => l.label === "Soprano");
-  current.mine = Math.min(entry.mine ?? Math.max(0, soprano), score.lines.length - 1);
+  current.mine = Math.min(entry.mine ?? sopranoLine(), score.lines.length - 1);
   current.excluded = entry.excluded ?? score.lines.filter((l) => l.accompaniment).map((l) => l.id);
   current.manual = entry.manual ?? {};
   current.markedStaff = entry.markedStaff ?? {};
@@ -2128,8 +2127,7 @@ function repairReferences() {
   const excluded = current.excluded.filter(okLine);
   const changed = Object.keys(manual).length !== Object.keys(current.manual).length || excluded.length !== current.excluded.length;
   if (!okLine(current.mine)) {
-    const soprano = score.lines.findIndex((l) => l.label === "Soprano");
-    current.mine = Math.max(0, soprano);
+    current.mine = sopranoLine();
   }
   current.manual = manual;
   current.excluded = excluded;
@@ -2145,10 +2143,19 @@ function myLineAt(beat) {
 // there are more sung lines than any choir score has (layouts that change
 // between pages, e.g. Christ Is King: 16 lines, two of each SATB name). Then
 // the panel shows how to get your part (Fix systems, then mark) instead.
+// Numbered parts (score.js numberParts) are only doubtful when they vary from
+// system to system.
 let showAllParts = false;
 function partsDoubtful() {
+  if (score.partsVary) return true;
+  if (score.numbered) return false;
   const names = score.lines.filter((l) => !l.accompaniment).map((l) => l.label);
   return new Set(names).size < names.length || names.length > 8;
+}
+
+// The part to start on: the soprano, named or hinted, else the first.
+function sopranoLine() {
+  return Math.max(0, score.lines.findIndex((l) => l.label === "Soprano" || l.hint === "Soprano"));
 }
 
 function renderPartChoice() {
@@ -2549,6 +2556,8 @@ function renderLines() {
         <label class="pick"><input type="radio" name="mine"><span></span><span class="range">${range}</span></label>
         <label class="include"><input type="checkbox"> play</label>`;
       li.querySelector(".pick span").textContent = line.label;
+      // A guessed name, less sure than the number.
+      if (line.hint) li.querySelector(".pick span").after(Object.assign(document.createElement("span"), { className: "hint-name", textContent: `${line.hint.toLowerCase()}?` }));
       const radio = li.querySelector('input[type="radio"]');
       radio.checked = line.id === current.mine;
       radio.onchange = () => {
