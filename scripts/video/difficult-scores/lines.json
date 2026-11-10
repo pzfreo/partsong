@@ -1,0 +1,13 @@
+{
+ "intro": "Some scores are harder to read. Here's how to help Partsong with them.",
+ "open": "This carol changes layout: four staves for the first verse, and two for the last. Open it, and tap Read music.",
+ "systems": "First, check the red lines. Each one marks where a line of music ends.",
+ "remove": "Here, Partsong has split one line of music in two. Tap the red line to remove it.",
+ "add": "And here, two lines of music have run together. Tap between them to add a red line.",
+ "next": "Then tap Next, and Partsong reads the notes.",
+ "parts": "Because the layout changes, the list of parts doesn't make sense. So mark your part on the music instead.",
+ "mark": "Tap the staff you sing in each line of music. I'm an alto.",
+ "shared": "Where two voices share a staff, tap once for the upper voice, and twice for the lower.",
+ "play": "Tap Done, then play. Partsong plays exactly what you marked.",
+ "end": "Partsong. Free on your iPhone, Android and desktop."
+}
