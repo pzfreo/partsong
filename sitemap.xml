@@ -1,7 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
   <url><loc>https://partsong.app/</loc></url>
-  <url><loc>https://partsong.app/learn-your-choir-part.html</loc></url>
+  <url>
+    <loc>https://partsong.app/learn-your-choir-part.html</loc>
+    <video:video>
+      <video:thumbnail_loc>https://partsong.app/video/partsong-getting-started.jpg</video:thumbnail_loc>
+      <video:title>How to learn your choir part with Partsong</video:title>
+      <video:description>A 90-second walkthrough: open a score, check the lines of music, pick your part, turn the other parts down, slow it down, and share it with your choir. Free on iPhone, Android and desktop.</video:description>
+      <video:content_loc>https://partsong.app/video/partsong-getting-started.mp4</video:content_loc>
+      <video:duration>92</video:duration>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
+  </url>
   <url><loc>https://partsong.app/rehearsal-tracks.html</loc></url>
   <url><loc>https://partsong.app/choir-directors.html</loc></url>
   <url><loc>https://partsong.app/cpdl.html</loc></url>
