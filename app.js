@@ -806,6 +806,7 @@ function failureReason(e) {
   return (
     last
       .replace(/^(Uncaught )?(Exception|Error): /, "")
+      .replace(/^no available backend found\. ERR: /, "")
       .replace(/(\/[\w.-]+)+/g, "…")
       .replace(/\d+(\.\d+)?/g, "N")
       .slice(0, 80) || "unknown"
@@ -1335,6 +1336,8 @@ async function readScan() {
       );
       return;
     }
+    // onnxruntime that didn't start won't in this reader: the next read gets a new one.
+    if (/no available backend found|initWasm/.test(e.message)) resetWorker();
     track("read-failed");
     track(`read-failed (${deviceTag})`);
     track(`read-failed (${deviceTag}): ${failureReason(e)}`);

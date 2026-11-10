@@ -170,7 +170,14 @@ async function newSession(id) {
     post({ type: "log", msg: `WebGPU setup failed (${e.message}); using WASM from now on` });
     useGpu = false;
     eps = ["wasm"];
-    session = await create();
+    try {
+      session = await create();
+    } catch (e2) {
+      // onnxruntime's WebAssembly itself didn't start: the WebGPU attempt
+      // started it first, so its error says why ("[webgpu] …"); the WASM
+      // attempt only says "previous call to 'initWasm()' failed" (iPhone, v258).
+      throw /previous call to 'initWasm\(\)' failed/.test(e2.message) ? e : e2;
+    }
   }
   if (eps[0] === "webgpu") onGpu.add(id);
   else onGpu.delete(id);
