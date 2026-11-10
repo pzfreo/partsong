@@ -6,9 +6,9 @@
     <video:video>
       <video:thumbnail_loc>https://partsong.app/video/partsong-getting-started.jpg</video:thumbnail_loc>
       <video:title>How to learn your choir part with Partsong</video:title>
-      <video:description>A 90-second walkthrough: open a score, check the lines of music, pick your part, turn the other parts down, slow it down, and share it with your choir. Free on iPhone, Android and desktop.</video:description>
+      <video:description>An 84-second walkthrough: open a score, check the lines of music, pick your part, turn the other parts down, slow it down, and share it with your choir. Free on iPhone, Android and desktop.</video:description>
       <video:content_loc>https://partsong.app/video/partsong-getting-started.mp4</video:content_loc>
-      <video:duration>92</video:duration>
+      <video:duration>84</video:duration>
       <video:family_friendly>yes</video:family_friendly>
     </video:video>
   </url>
