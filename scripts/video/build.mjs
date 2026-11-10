@@ -29,4 +29,4 @@ for (const v of vos) {
 filters.push(`${mix.join("")}amix=inputs=${mix.length}:normalize=0:dropout_transition=0,alimiter=limit=0.95,apad[a]`);
 execFileSync("ffmpeg", ["-y", "-loglevel", "error", ...inputs, "-filter_complex", filters.join(";"),
   "-map", "0:v", "-map", "[a]", "-t", end.toFixed(2), "-c:a", "aac", "-b:a", "160k",
-  "-vf", "fps=30,scale=824:-2:flags=lanczos,format=yuv420p", "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-movflags", "+faststart", out]);
+  "-vf", "fps=30,scale=824:-2:flags=lanczos,format=yuv420p", "-c:v", "libx264", "-preset", "slow", "-crf", "24", "-movflags", "+faststart", out]);
