@@ -542,7 +542,7 @@ export function playOrder(measures, from, to, targets = {}) {
 
 // pages: array of parsePage() results, in page order. legacyAlign: bars lined
 // up across parts page by page, as before layout 2 (LAYOUT in app.js).
-export function buildScore(pages, { legacyAlign = false } = {}) {
+export function buildScore(pages, { legacyAlign = false, byVoice = true } = {}) {
   pages.forEach((page) => alignBars(page, legacyAlign));
   pages.forEach(foldSplitChoir);
   // Match parts across pages by staff layout: the k-th 2-staff part on each
@@ -734,16 +734,51 @@ export function buildScore(pages, { legacyAlign = false } = {}) {
     ["Soprano", "Alto", "Tenor", "Bass"].forEach((name, i) => (lines[i].label = name));
   }
   lines.forEach((l, i) => (l.id = i));
-  const systems = findSystems(measures, lines, staffBoxes);
+  let systems = findSystems(measures, lines, staffBoxes);
+  const voiced = byVoice && byVoiceOrder(lines, systems);
+  if (voiced) systems = findSystems(measures, voiced, staffBoxes, { scoped: true });
   barAreas(systems);
-  return { title: pages.find((p) => p.title)?.title || "", measures, lines, systems, length: t };
+  return { title: pages.find((p) => p.title)?.title || "", measures, lines: voiced || lines, systems, length: t };
+}
+
+// A score whose layout changes (verses on two staves, the last on four; a
+// voice moving staff) is read as different parts on different pages, so
+// matching parts by staff layout mixes the voices up. But each system still
+// has its voices top to bottom (upper before lower on a shared staff): when
+// every system has the same number of voices, the k-th voice of each system is
+// one line. Scores whose systems already agree are left as they are.
+function byVoiceOrder(lines, systems) {
+  if (systems.length < 2 || lines.some((l) => l.accompaniment)) return null;
+  const rank = (id) => (lines[id].voice === "lower" ? 1 : 0);
+  const seqs = systems.map((sys) => sys.staves.flatMap((st) => [...st.lines].sort((a, b) => rank(a) - rank(b))));
+  const n = seqs[0].length;
+  if (n < 2 || n > 8 || seqs.some((q) => q.length !== n || new Set(q).size !== n)) return null;
+  if (seqs.every((q) => q.join() === seqs[0].join())) return null;
+  const out = [...Array(n)].map(() => ({ notes: [], voices: new Set(), staffKey: null }));
+  systems.forEach((sys, i) =>
+    seqs[i].forEach((id, k) => {
+      const from = lines[id];
+      // Each note keeps the staff it was read on, so marking still finds it.
+      out[k].notes.push(...from.notes.filter((x) => x.t >= sys.start && x.t < sys.end && x.pos?.page === sys.page).map((x) => ({ ...x, staffKey: x.staffKey ?? from.staffKey })));
+      out[k].voices.add(from.voice);
+      out[k].staffKey ??= from.staffKey;
+    }),
+  );
+  const names = n === 4 ? ["Soprano", "Alto", "Tenor", "Bass"] : null;
+  return out.map((o, k) => ({
+    id: k,
+    label: names ? names[k] : `Voice ${k + 1}`,
+    staffKey: o.staffKey,
+    voice: o.voices.has("lower") ? "lower" : o.voices.has("upper") ? "upper" : "only",
+    notes: o.notes.sort((a, b) => a.t - b.t),
+  }));
 }
 
 // Groups bars into systems (one row of music on a page): a new system starts
 // on a new page, when a bar sits left of the previous one, or below it. For each system,
 // lists its staves top to bottom with their extent on the photo and the lines
 // (voices) on each, so a tap can be mapped to a staff and voice.
-function findSystems(measures, lines, staffBoxes = []) {
+function findSystems(measures, lines, staffBoxes = [], { scoped = false } = {}) {
   const linesOn = new Map(); // staff key -> ids of the lines sung on it
   for (const line of lines) {
     for (const key of new Set([line.staffKey, ...line.notes.map((n) => n.staffKey).filter(Boolean)])) {
@@ -804,7 +839,9 @@ function findSystems(measures, lines, staffBoxes = []) {
       boxesOf.set(b.staffKey, [...(boxesOf.get(b.staffKey) ?? []), b]);
     }
     for (const [key, boxes] of boxesOf) {
-      const ids = linesOn.get(key) ?? [];
+      // Lines regrouped by voice share staff keys across pages: only the
+      // lines with notes on this staff in this system are on it.
+      const ids = scoped ? [...(staves.get(key)?.lines ?? [])] : linesOn.get(key) ?? [];
       if (!ids.length) continue;
       const overlaps = (a, b) => a.y0 < b.y1 && b.y0 < a.y1;
       const best = boxes.map((b) => boxes.filter((o) => overlaps(o, b))).sort((a, b) => b.length - a.length)[0];

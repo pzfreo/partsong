@@ -44,5 +44,5 @@ const r = {
   offBefore: off.map((id) => label(old.lines[id])).sort().join(","),
   offAfter: saved.excluded.map((id) => label(now.lines[id])).sort().join(","),
 };
-r.ok = r.oldSoprano !== r.newSoprano && r.layout === 3 && r.mine === label(old.lines[sop]) && r.mark === r.mine && r.offBefore.split(",").length === 8 && r.markedStaff === now.lines[r.newSoprano].staffKey && r.offBefore === r.offAfter;
+r.ok = r.oldSoprano !== r.newSoprano && r.layout === 4 && r.mine === label(old.lines[sop]) && r.mark === r.mine && r.offBefore.split(",").length === 8 && r.markedStaff === now.lines[r.newSoprano].staffKey && r.offBefore === r.offAfter;
 window.result = r;

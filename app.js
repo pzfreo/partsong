@@ -1815,7 +1815,9 @@ let score;
 // lined up system by system, which can drop a misread extra bar or system).
 // Layout 3: a pair of staves read as one goes back on two, which can change
 // the parts, so the saved part choices (line ids) move to the same music.
-const LAYOUT = 3;
+// Layout 4: a score whose layout changes, with the same voices in every
+// system, has one line per voice (score.js byVoiceOrder): the same again.
+const LAYOUT = 4;
 function migrateLayout(entry) {
   const was = entry.layout ?? 1;
   if (was >= LAYOUT) return;
@@ -1837,17 +1839,17 @@ function migrateLayout(entry) {
     const barNo = (n) => { const i = bar.get(Number(n) - 1); return i == null ? null : i + 1; };
     entry.repeats = entry.repeats && Object.fromEntries(Object.entries(entry.repeats).map(([k, v]) => [barNo(k), barNo(v) ?? v]).filter(([k]) => k != null));
   }
-  moveLines(entry); // after the marks have moved to this layout's systems
+  moveLines(entry, was); // after the marks have moved to this layout's systems
   updateEntry(entry.id, { layout: entry.layout, manual: entry.manual, markedStaff: entry.markedStaff, repeats: entry.repeats, mine: entry.mine, excluded: entry.excluded });
 }
 
 // Saved part choices (your part, parts switched off, marks) are line ids:
 // re-point each at the line now holding most of its notes, and each mark's
 // staff at the staff that line is on in that system, nearest the old one.
-function moveLines(entry) {
+function moveLines(entry, was) {
   const used = entry.mine != null || entry.excluded?.length || Object.keys(entry.manual ?? {}).length;
   if (!used) return;
-  const old = buildScore(entry.pages.map((x) => parsePage(x, { restaff: false })));
+  const old = buildScore(entry.pages.map((x) => parsePage(x, { restaff: was >= 3 })), { byVoice: false });
   const sig = (s) => JSON.stringify(s.lines.map((l) => [l.label, l.staffKey, l.voice, l.notes.length]));
   if (sig(old) === sig(score)) return;
   const notes = score.lines.map((l) => new Set(l.notes.map((n) => `${n.t}:${n.midi}`)));
