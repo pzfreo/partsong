@@ -26,6 +26,6 @@ const r = {
   page11: [...pages[10].querySelectorAll(".mark-label")].map((t) => t.textContent),
   marksPerPage: pages.map((p) => p.querySelectorAll("rect.mark").length).join(","),
 };
-r.ok = r.bars === 83 && r.lastPage === "76:sys20 77:sys20 78:sys20 79:sys20 80:sys21 81:sys21 82:sys21 83:sys21" && r.layout === 3 &&
+r.ok = r.bars === 83 && r.lastPage === "76:sys20 77:sys20 78:sys20 79:sys20 80:sys21 81:sys21 82:sys21 83:sys21" && r.layout === 4 &&
   r.manualKeys === [...Array(22).keys()].join(",") && r.page11.join() === "upper voice" && r.marksPerPage === Array(11).fill(2).join(",");
 window.result = r;
