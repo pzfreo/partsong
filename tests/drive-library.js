@@ -35,8 +35,8 @@ const set = (id, v) => { app.$(id).value = v; app.$(id).dispatchEvent(new app.w.
 // A part by its number or its hinted name ("Part 3 upper" is the tenor?).
 const row = (label) => [...app.w.document.querySelectorAll("#lines li")].find((li) => li.querySelector(".pick span").textContent === label || li.querySelector(".hint-name")?.textContent === `${label.toLowerCase()}?`);
 const name = (li) => li.querySelector(".hint-name")?.textContent.replace("?", "") ?? li.querySelector(".pick span").textContent;
-row("Tenor").querySelector('input[type="radio"]').click();
-row("Solo").querySelector('input[type="checkbox"]').click();
+row("Part 3 upper").querySelector('input[type="radio"]').click();
+row("Part 1").querySelector('input[type="checkbox"]').click();
 set("others", 60);
 app.$("title").value = "Huron p2"; app.$("title").dispatchEvent(new app.w.Event("change"));
 app.$("tempo").value = 100; app.$("tempo").dispatchEvent(new app.w.Event("change"));
