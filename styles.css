@@ -115,9 +115,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 .icon-btn { min-height: 36px; padding: 0 10px; background: transparent; border: none; color: inherit; font-size: 1.3rem; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .intro { margin: 8px 0 20px; }
-.newcomer { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; }
+.newcomer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 14px 0 0; }
 .newcomer p { margin: 0; }
-.newcomer .actions { flex-wrap: nowrap; }
+.newcomer .actions { flex-wrap: nowrap; gap: 8px; }
+.newcomer .actions > * { white-space: nowrap; padding: 0 14px; }
+.newcomer p { white-space: nowrap; }
 a.button { text-decoration: none; color: inherit; }
 .tagline { margin: 0; font-size: 1.6rem; line-height: 1.2; font-weight: 750; letter-spacing: -0.02em; }
 .tagline span { color: var(--gold-ink); }
@@ -331,6 +333,7 @@ input[type="radio"], input[type="checkbox"] { width: 20px; height: 20px; accent-
 .legal a.button.primary { color: var(--accent-text); }
 .legal-links { margin-top: 32px; }
 .report-link a { color: var(--accent); }
+.hint a { color: var(--accent); }
 header a.icon-btn { color: inherit; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 .about-card h2 small { font-size: 0.8rem; font-weight: 400; color: var(--muted); }
 .about-card h3 { font-size: 1rem; margin: 18px 0 6px; }
