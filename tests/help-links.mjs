@@ -1,9 +1,9 @@
-// Help is one hub (learn-your-choir-part.html): every website page's footer is
+// Help is one hub (help.html): every website page's footer is
 // just "Help" pointing there, and every link to a section of a page
 // (page.html#id) finds that id. Run: node tests/help-links.mjs
 import fs from "node:fs";
 const pages = fs.readdirSync(".").filter((f) => f.endsWith(".html"));
-const hub = "learn-your-choir-part.html";
+const hub = "help.html";
 const bad = [];
 for (const p of pages) {
   const html = fs.readFileSync(p, "utf8");
