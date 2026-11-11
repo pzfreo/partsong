@@ -86,7 +86,19 @@ self.addEventListener("fetch", (e) => {
         const hit = await cache.match(e.request);
         if (hit) return hit;
         const res = await fetch(e.request);
-        if (res.ok) cache.put(e.request, res.clone());
+        if (res.ok) {
+          cache.put(e.request, res.clone());
+          // A library at a new version: the old version's files (tens of MB
+          // for onnxruntime) aren't kept, as phones are short of storage.
+          const lib = url.pathname.match(/\/lib\/([^/]+)@([^/]+)\//);
+          if (lib) {
+            e.waitUntil(
+              cache.keys().then((keys) =>
+                Promise.all(keys.filter((k) => new URL(k.url).pathname.match(/\/lib\/([^/]+)@([^/]+)\//)?.[1] === lib[1] && !k.url.includes(`/lib/${lib[1]}@${lib[2]}/`)).map((k) => cache.delete(k))),
+              ),
+            );
+          }
+        }
         return res;
       }).then(isolated), // the reader's threads are workers made from these files: without the headers an isolated page refuses them
     );
@@ -104,8 +116,21 @@ self.addEventListener("fetch", (e) => {
       if (res.ok) {
         const copy = res.clone();
         const latest = res.clone();
+        // The exact copy only for a plain or versioned (?v=…) address: an
+        // update check's ./?check=<time> left another copy of the page each
+        // time, for good. And when a file arrives at a new version, its other
+        // versions go (each deploy left its scripts and the music reader).
+        const keep = !url.search || /^\?v=\w+$/.test(url.search);
         e.waitUntil(
-          caches.open(SHELL).then((c) => Promise.all([c.put(e.request, copy), url.search && c.put(plain.href, latest)])),
+          caches.open(SHELL).then(async (c) => {
+            await Promise.all([keep && c.put(e.request, copy), url.search && c.put(plain.href, latest)]);
+            if (!url.search) return;
+            for (const k of await c.keys(plain.href, { ignoreSearch: true })) {
+              const q = new URL(k.url).search;
+              // (A check clears earlier checks' copies, not a version's.)
+              if (q && q !== url.search && (keep || !/^\?v=\w+$/.test(q))) await c.delete(k);
+            }
+          }),
         );
       }
       return res;
