@@ -1,10 +1,14 @@
 """Test server: serves the repo with HTTP range support, and (with --flaky)
 breaks every third /models/ response halfway through, to test resumable
-model downloads. Usage: python3 scripts/flaky-server.py PORT [--flaky]"""
+model downloads; with --flaky-wasm, breaks the first response for each of
+the reader's own .wasm files (omr/) halfway through.
+Usage: python3 scripts/flaky-server.py PORT [--flaky] [--flaky-wasm]"""
 import http.server, os, re, sys
 
 FLAKY = "--flaky" in sys.argv
+FLAKY_WASM = "--flaky-wasm" in sys.argv
 count = 0
+broken = set()
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -15,6 +19,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         global count
         path = self.translate_path(self.path.split("?")[0])
         rng = self.headers.get("Range")
+        name = self.path.split("?")[0]
+        if FLAKY_WASM and "/omr/" in name and name.endswith(".wasm") and name not in broken and os.path.isfile(path):
+            broken.add(name)
+            sys.stderr.write(f"wasm cut {name}\n")
+            data = open(path, "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/wasm")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data[: len(data) // 2])
+            self.wfile.flush()
+            self.connection.shutdown(2)  # drop the connection mid-response
+            return
         if "/models/" not in self.path or not os.path.isfile(path):
             return super().do_GET()
         size = os.path.getsize(path)
