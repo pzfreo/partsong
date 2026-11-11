@@ -41,6 +41,21 @@ const modelUrl = (name) => new URL("models/" + name, location.href).href;
 const pieceKey = (name, i) => `${modelUrl(name)}?piece=${i}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The reader's own WebAssembly (path + this version's ?v=…). A connection that
+// drops while it downloads fails the read ("WebAssembly compilation aborted:
+// Network error: Response body loading was aborted", Android, v260): try again.
+async function compileWasm(path) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await WebAssembly.compileStreaming(fetch(path + location.search));
+    } catch (e) {
+      if (e instanceof WebAssembly.CompileError || attempt >= 4) throw e;
+      post({ type: "progress", stage: "retry", name: path, attempt, why: e.message || e.name });
+      await sleep(1000 * attempt * attempt);
+    }
+  }
+}
+
 async function fetchPiece(url, start, end) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), STALL_MS);
@@ -251,7 +266,7 @@ async function decoderModule() {
   }
   if (WebAssembly.validate(RELAXED_SIMD)) {
     try {
-      const mod = await WebAssembly.compileStreaming(fetch("omr/partsong_omr_fused.wasm" + location.search));
+      const mod = await compileWasm("omr/partsong_omr_fused.wasm");
       const { exports: rs } = await WebAssembly.instantiate(mod, {});
       if (rs.decoder_fused_simd_supported() === 1) return { rs, build: "relaxed SIMD" };
     } catch (e) {
@@ -283,7 +298,7 @@ async function tune() {
   for (let i = 0; i < image.length; i++) image[i] = ((i * 2654435761) >>> 0) / 4294967296; // fixed pseudo-random pixels
   let fused = WebAssembly.validate(RELAXED_SIMD);
   const file = () => (fused ? "omr/partsong_omr_threads_fused.wasm" : "omr/partsong_omr_threads.wasm");
-  let mod = await WebAssembly.compileStreaming(fetch(file() + location.search));
+  let mod = await compileWasm(file());
   const ms = {};
   const order = [...counts, ...[...counts].reverse()];
   for (let i = 0; i < order.length; i++) {
@@ -293,7 +308,7 @@ async function tune() {
       const e = pool.exports;
       if (fused && e.encoder_fused_simd_supported() !== 1) {
         fused = false; // as decoderModule would: the plain SIMD build
-        mod = await WebAssembly.compileStreaming(fetch(file() + location.search));
+        mod = await compileWasm(file());
         i--;
         continue;
       }
@@ -358,7 +373,7 @@ async function tune() {
 async function threadedModule(threads) {
   const { EncoderPool } = await import("./omr/encoder_pool.mjs");
   const pick = async (file) => {
-    const mod = await WebAssembly.compileStreaming(fetch(file + location.search));
+    const mod = await compileWasm(file);
     const pool = await EncoderPool.create(mod, { threads });
     return pool;
   };
@@ -644,7 +659,7 @@ async function init(noGpu, exact) {
   post({ type: "log", msg: `WASM threads: ${ort.env.wasm.numThreads}` });
   useGpu = !noGpu && !!(self.navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)));
   // Same deploy version as this worker (?v=… from scripts/stamp-version.mjs).
-  wasmModule = await WebAssembly.compileStreaming(fetch("omr/partsong_omr.wasm" + location.search));
+  wasmModule = await compileWasm("omr/partsong_omr.wasm");
   for (const name of MODELS) {
     await downloadModel(name);
   }
