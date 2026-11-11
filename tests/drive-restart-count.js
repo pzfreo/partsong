@@ -1,6 +1,6 @@
 // A reading cut off by the phone (Safari closing the page) carries on at the
 // next launch; that's counted by kind of device, as is giving up after two
-// tries (once). GoatCounter is kept out so the stand-in counts:
+// tries (once), each with where the reading had got to. GoatCounter is kept out so the stand-in counts:
 //   CHROME_FLAGS="--host-resolver-rules=MAP gc.zgo.at ~NOTFOUND" node scripts/headless-test.mjs \
 //     http://localhost:8765/index.html out.json 120 tests/drive-restart-count.js
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -25,8 +25,8 @@ await seed(2); r.gaveUp = await open(); r.gaveUpAgain = await open();
 // when the phone keeps closing the tab, so the scan stays unfinished.
 await seed(0, [new Blob(["not an image"], { type: "image/png" })]);
 r.launches = [];
-for (let i = 0; i < 4; i++) r.launches.push((await open()).filter((p) => /^read-(restarted|gave-up) \(/.test(p)).map((p) => p.split(" ")[0]).join(",") || "-");
+for (let i = 0; i < 4; i++) r.launches.push((await open()).filter((p) => /^read-(restarted|gave-up) \(/.test(p)).map((p) => p.split(" ")[0] + (p.endsWith(": finding systems, 1 page") ? "" : "?")).join(",") || "-");
 await seed(null);
-r.ok = r.restarted.some((p) => /^read-restarted \(\w+ \w+\)$/.test(p)) && /^read-gave-up \(\w+ \w+\)$/.test(r.gaveUp.join()) && r.gaveUpAgain.length === 0
+r.ok = r.restarted.some((p) => /^read-restarted \(\w+ \w+\): finding systems, 0 pages$/.test(p)) && /^read-gave-up \(\w+ \w+\): finding systems, 0 pages$/.test(r.gaveUp.join()) && r.gaveUpAgain.length === 0
   && r.launches.join(" ") === "read-restarted read-restarted read-gave-up -";
 window.result = r;
