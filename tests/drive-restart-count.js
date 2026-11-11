@@ -19,14 +19,15 @@ const open = async () => {
 const r = {};
 await seed(0); r.restarted = await open();
 await seed(2); r.gaveUp = await open(); r.gaveUpAgain = await open();
-// Through the real path: each launch resumes the scan (readScan saves it again),
-// and the count must survive that save: restarted, restarted, then gave up.
-// A page that can't be read: each launch's read fails without progress, as
-// when the phone keeps closing the tab, so the scan stays unfinished.
+// Through the real path: the launch resumes the scan (readScan saves it again),
+// and the count survives that save. A page that can't be read: the read fails
+// with an error, which isn't the phone closing the page, so it's marked
+// stopped and later launches neither restart it nor count it.
 await seed(0, [new Blob(["not an image"], { type: "image/png" })]);
 r.launches = [];
 for (let i = 0; i < 4; i++) r.launches.push((await open()).filter((p) => /^read-(restarted|gave-up) \(/.test(p)).map((p) => p.split(" ")[0] + (p.endsWith(": finding systems, 1 page") ? "" : "?")).join(",") || "-");
+r.afterError = await new Promise((res) => { const q = indexedDB.open("partscanner", 1); q.onsuccess = () => { const g = q.result.transaction("scores").objectStore("scores").get("cut"); g.onsuccess = () => { q.result.close(); res({ stopped: g.result?.stopped, resumes: g.result?.resumes }); }; }; });
 await seed(null);
 r.ok = r.restarted.some((p) => /^read-restarted \(\w+ \w+\): finding systems, 0 pages$/.test(p)) && /^read-gave-up \(\w+ \w+\): finding systems, 0 pages$/.test(r.gaveUp.join()) && r.gaveUpAgain.length === 0
-  && r.launches.join(" ") === "read-restarted read-restarted read-gave-up -";
+  && r.launches.join(" ") === "read-restarted - - -" && r.afterError.stopped === true && r.afterError.resumes === 1;
 window.result = r;

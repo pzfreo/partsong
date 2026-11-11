@@ -1181,6 +1181,7 @@ async function checkSystems(stopped) {
     pageLabel = "";
     $("systems-check").hidden = true;
     $("recognise").hidden = false;
+    $("check-list").replaceChildren(); // its full-size page pictures aren't kept
   }
   scanSettings.systemsChecked = true;
   // Reading again: the saved score stays as it was until the new reading is saved.
@@ -1303,6 +1304,7 @@ async function readScan() {
     // to check (the reader may group them differently now).
     if (!scanSettings.systemsChecked) await checkSystems(stopped);
     $("read-step").hidden = false;
+    let dropped = false;
     for (let i = 0; i < pages.length; i++) {
       if (pages[i].xml) continue;
       pageLabel = `Page ${i + 1} of ${pages.length}`;
@@ -1325,9 +1327,13 @@ async function readScan() {
         }
         renderPages();
         i--;
+        dropped = true;
       }
       scanResumes = 0; // progress
-      if (saved) await db.update(scanId, { images: pages.map((p) => p.blob), pages: pages.map((p) => p.xml ?? null), found: foundLayouts(), resumes: 0 }).catch(() => {});
+      // The photos are stored already: written again only when a page was
+      // left out (every page's bytes, copied and rewritten for each page read).
+      if (saved) await db.update(scanId, { ...(dropped ? { images: pages.map((p) => p.blob) } : {}), pages: pages.map((p) => p.xml ?? null), found: foundLayouts(), resumes: 0 }).catch(() => {});
+      dropped = false;
     }
     pageLabel = "";
     const secs = Math.round((performance.now() - t0) / 1000);
@@ -1351,6 +1357,9 @@ async function readScan() {
       );
       return;
     }
+    // Not carried on by itself either: it would fail the same way at each
+    // launch, and be counted as the phone closing the page (read-gave-up).
+    if (saved) await db.update(scanId, { stopped: true }).catch(() => {});
     // onnxruntime that didn't start won't in this reader: the next read gets a new one.
     if (/no available backend found|initWasm/.test(e.message)) resetWorker();
     track("read-failed");
@@ -1385,6 +1394,9 @@ async function readScan() {
   entry.readBy = { version: SHOWN_VERSION, device: deviceKind, browser: ua, at: Date.now() };
   saved = await db.put(entry).then(() => true, () => false);
   if (!saved) setPageStatus("Read OK, but couldn't save it on this phone (storage full?).");
+  // The reader isn't kept while the score is practised (its models and
+  // working memory are hundreds of MB); the next read loads it from storage.
+  resetWorker();
   scanId = null;
   rereading = false;
   // If they've gone back to the library meanwhile, it's just added there.
@@ -1400,6 +1412,14 @@ $("open-xml").onchange = async (e) => {
 
 // Score files (shared from Partsong) and MusicXML, from the picker or the
 // share sheet; an ordinary PDF starts a new scan.
+// A scan to look over can't be loaded while another is being read: its pages
+// would replace the ones the read is working through. Shows that read instead.
+function busyReading() {
+  if (!reading) return false;
+  show("scan");
+  showNotice("Partsong is still reading a score. Open the file again when it's done.");
+  return true;
+}
 async function openFiles(files) {
   try {
     const xmls = [];
@@ -1427,7 +1447,7 @@ async function openFiles(files) {
     }
     // An ordinary PDF is sheet music to read: its pages, to look over before
     // Read music (step 1 of 3, as with photos).
-    if (pdfs.length) {
+    if (pdfs.length && !busyReading()) {
       loadScan();
       if ((await addFiles(pdfs)) && pages.length) setPageStatus("Check the pages, then tap Read music.");
     }
@@ -1824,6 +1844,7 @@ async function openInbox() {
   if (!keys.length) return;
   const scans = [];
   const others = [];
+  let waiting = false;
   for (const req of keys) {
     const res = await cache.match(req);
     const name = decodeURIComponent(res.headers.get("x-name") || "shared");
@@ -1834,12 +1855,18 @@ async function openInbox() {
       await offerImport(shared, () => cache.delete(req));
       continue;
     }
+    // Pages to read wait in the inbox while another score is being read.
+    if (reading && (f.type.startsWith("image/") || (await isPdf(f)))) {
+      waiting = true;
+      continue;
+    }
     if (!(await cache.delete(req))) continue; // another window took it
     if (f.type.startsWith("image/") || (await isPdf(f))) scans.push(f);
     else others.push(f);
   }
   if (others.length) await openFiles(others);
-  if (scans.length) {
+  if (waiting) busyReading();
+  if (scans.length && !busyReading()) {
     loadScan();
     await addFiles(scans);
   }
@@ -3046,7 +3073,7 @@ window.launchQueue?.setConsumer(async ({ files: handles }) => {
       await offerImport(shared);
     } else scans.push(f);
   }
-  if (scans.length) {
+  if (scans.length && !busyReading()) {
     loadScan();
     await addFiles(scans);
   }
