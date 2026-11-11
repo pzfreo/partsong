@@ -49,7 +49,11 @@ export class Player {
   // in the score.
   offset() {
     if (!this.playing) return this.startOffset ?? 0;
-    return this.startOffset + ((this.ctx.currentTime - this.startTime) * this.bpm) / 60;
+    // A loop's next pass is scheduled a second before it sounds (see
+    // schedule): until it does, this is where the pass still sounding is.
+    const pass = this.prev && this.ctx.currentTime < this.startTime ? this.prev : this;
+    if (pass === this) this.prev = null;
+    return pass.startOffset + ((this.ctx.currentTime - pass.startTime) * this.bpm) / 60;
   }
 
   position() {
@@ -73,6 +77,7 @@ export class Player {
     });
     this.total = at;
     this.playing = true;
+    this.prev = null;
     this.loop = loop;
     this.startOffset = startOffset;
     this.startTime = this.ctx.currentTime + 0.1;
@@ -90,6 +95,14 @@ export class Player {
       }
     };
     frame();
+  }
+
+  // Done with (another score is opened): a running AudioContext is never
+  // collected, and each holds an audio thread and the phone's audio session.
+  close() {
+    this.stop();
+    this.ctx?.close().catch(() => {});
+    this.ctx = null;
   }
 
   stop(notify = true) {
@@ -117,7 +130,10 @@ export class Player {
     }
     if (horizon >= this.total) {
       if (this.loop) {
-        // Restart the timeline so the start lands exactly at the end.
+        // Restart the timeline so the start lands exactly at the end. The
+        // pass still sounding is kept for offset(), or the bar shown would
+        // jump to the start a second early.
+        this.prev = { startTime: this.startTime, startOffset: this.startOffset };
         this.startTime += (this.total - this.startOffset) * secPerBeat;
         this.startOffset = 0;
         this.scheduledUntil = 0;

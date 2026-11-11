@@ -1988,11 +1988,13 @@ function openScore(entry, nav = "push") {
   current = entry;
   score = buildScore(entry.pages.map(parsePage));
   migrateLayout(entry);
-  player?.stop();
+  player?.close();
   player = new Player(score);
   playTracked = false;
   player.onPosition = (beat) => {
-    $("position").textContent = `Bar ${barAt(beat).number}`;
+    // Called every frame: the text is written only when the bar changes.
+    const text = `Bar ${barAt(beat).number}`;
+    if ($("position").textContent !== text) $("position").textContent = text;
     follow(beat);
     followRead(beat);
   };
