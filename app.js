@@ -1447,6 +1447,29 @@ async function importScore(entry, received = false) {
   openScore(entry);
 }
 
+// Before a score first leaves this device (a link, a recording or a PDF), the
+// singer says they're allowed to share the music; asked once per score.
+async function allowedToShare(id) {
+  const entry = (await db.all()).find((e) => e.id === id);
+  if (!entry || entry.shareAllowed) return true;
+  return new Promise((resolve) => {
+    const answer = (yes) => {
+      $("rights").hidden = true;
+      $("rights-yes").onclick = $("rights-no").onclick = null;
+      if (yes) {
+        updateEntry(id, { shareAllowed: true });
+        if (current?.id === id) current.shareAllowed = true;
+      }
+      track(yes ? "share-allowed" : "share-not-allowed");
+      resolve(yes);
+    };
+    $("rights-yes").onclick = () => answer(true);
+    $("rights-no").onclick = () => answer(false);
+    $("rights").hidden = false;
+    $("rights-yes").focus();
+  });
+}
+
 // Shares a library score as a link (through the relay, see share.js), or as
 // the PDF when the relay couldn't take it. Preparing can outlast
 // the browser's "just tapped" window for the share sheet; then it's kept and
@@ -1503,6 +1526,7 @@ async function updateShareReady() {
   $("share-audio").classList.toggle("ready", !!preparedAudio && preparedAudio.key === audioKey());
 }
 async function shareScore(id, button, status, label) {
+  if (!(await allowedToShare(id))) return;
   const say = shareReporter(button, status, label);
   button.disabled = true;
   try {
@@ -1589,6 +1613,7 @@ function updateAudioButton() {
   updateShareReady();
 }
 $("share-audio").onclick = async () => {
+  if (!(await allowedToShare(current.id))) return;
   const button = $("share-audio");
   const say = shareReporter(button, null, SHARE_AUDIO);
   button.disabled = true;
@@ -1626,6 +1651,7 @@ $("share-score").onclick = () => shareScore(current.id, $("share-score"), $("pan
 // needs a fresh tap.
 let preparedPdf = null; // { key, file }
 $("export-pdf").onclick = async () => {
+  if (!(await allowedToShare(current.id))) return;
   const button = $("export-pdf");
   const say = shareReporter(button, null, EXPORT_PDF);
   button.disabled = true;
@@ -1666,7 +1692,7 @@ async function copyScore(id) {
 
 // A score shared by link (#s=<id>.<key>): fetched from the relay and
 // decrypted, then offered like any other. If the relay can't supply it, say
-// what to do: try again, or ask for it again (a link lasts a year).
+// what to do: try again, or ask for it again (a link lasts a month).
 async function receiveFromRelay() {
   track("receive: link");
   const fragment = location.hash.slice(1);
@@ -1684,7 +1710,7 @@ async function receiveFromRelay() {
   if (!entry)
     showNotice(
       failure.includes("404")
-        ? "This link has expired (links last a year). Ask for the score to be shared again."
+        ? "This link has expired (links last a month). Ask for the score to be shared again."
         : "Couldn't fetch this score just now. Check your connection and tap the link again.",
     );
 }

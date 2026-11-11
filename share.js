@@ -198,8 +198,9 @@ export async function shareKey(entry) {
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(what));
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-// Links last a year on the relay; reuse one only while it has a while to run.
-export const LINK_REUSE_MS = 330 * 864e5;
+// A link is promised for a month and kept for two (60 days, the relay bucket's
+// lifecycle rule): reuse one only within its first month, so it still has a month to run.
+export const LINK_REUSE_MS = 30 * 864e5;
 
 // What a share sends: { file, link, why }; link null when the relay couldn't take
 // it (then the file is shared), and why says why: too big, too slow, or unreachable.

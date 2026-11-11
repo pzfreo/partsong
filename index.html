@@ -67,7 +67,7 @@
       <h2 id="about-heading">Partsong <small id="about-version"></small></h2>
       <p>Scan choral sheet music on your phone and practise your own part, with the other parts quieter. <a href="help.html#video" target="_blank" rel="noopener">Watch the 1½-minute video</a> of how it works.</p>
       <p>Everything runs on your device: the music is read on the phone, and your scores stay on it unless you share them. No account needed.</p>
-      <p>When you share a score, an encrypted copy is uploaded so the link can bring it to the people you send it to. The key is only in the link, so nobody else, Partsong included, can open it. Copies are deleted after a year; for a copy that doesn't expire, use Save as a PDF file in a score's settings.</p>
+      <p>When you share a score, an encrypted copy is uploaded so the link can bring it to the people you send it to. The key is only in the link, so nobody else, Partsong included, can open it. Links work for a month, and copies are deleted soon after; for a copy that doesn't expire, use Save as a PDF file in a score's settings.</p>
       <p>To see which features get used, Partsong counts visits and actions (such as reading a score or pressing play), and in broad groups how many days it's been used, anonymously with <a href="https://www.goatcounter.com" target="_blank" rel="noopener">GoatCounter</a>: no cookies, nothing that identifies you, and never your scores or their names.</p>
       <h3>Licence</h3>
       <p>© 2026 Paul Fremantle. Partsong is free software: you can use, study, share and change it under the terms of the
@@ -93,6 +93,18 @@
       <div class="actions"><button id="about-close" class="primary">Close</button></div>
     </div>
   </div>
+  <div id="rights" class="report-overlay" role="alertdialog" aria-labelledby="rights-heading" aria-describedby="rights-text" hidden>
+    <div class="report-card">
+      <h2 id="rights-heading">Are you allowed to share this music?</h2>
+      <p id="rights-text">Sheet music is often in copyright. Share it only if it's out of copyright or you have permission, for example if your choir's licence covers copies for its singers.</p>
+      <div class="actions">
+        <button id="rights-yes" class="primary">Yes, I'm allowed</button>
+        <button id="rights-no">Cancel</button>
+      </div>
+      <p class="muted"><a href="terms.html#your-music" target="_blank" rel="noopener">More about sharing music</a></p>
+    </div>
+  </div>
+
   <div id="report" class="report-overlay" role="dialog" aria-labelledby="report-heading" hidden>
     <div class="report-card">
       <div class="card-head">
@@ -139,6 +151,7 @@
       </div>
       <div id="import-offer" class="import-offer" role="alertdialog" aria-labelledby="import-question" hidden>
         <p id="import-question"></p>
+        <p class="hint">Add it only if you're allowed to use this music: it's out of copyright, or your choir has permission for its singers' copies.</p>
         <div class="actions">
           <button id="import-yes" class="primary">Add</button>
           <button id="import-no">Cancel</button>
@@ -239,7 +252,7 @@
         <h2>Share</h2>
         <div class="row2 share-item" aria-live="polite">
           <button id="share-score">Send a link to another singer</button>
-          <p class="hint">Opens this score in Partsong for them, with your part and settings. Works for a year.</p>
+          <p class="hint">Opens this score in Partsong for them, with your part and settings. Works for a month.</p>
         </div>
         <p id="panel-share-status" class="muted share-status" aria-live="polite"></p>
         <div class="row2 share-item" aria-live="polite">
