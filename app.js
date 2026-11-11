@@ -960,8 +960,12 @@ async function addPage(image) {
   // after the app was in the background), and an upright photo is kept as is.
   const copy = new Blob([await image.arrayBuffer()], { type: image.type });
   const blob = await uprightPhoto(copy);
-  pages.push({ blob, url: URL.createObjectURL(blob) });
-  renderPages();
+  const p = { blob, url: URL.createObjectURL(blob) };
+  pages.push(p);
+  // One tile more, not the grid again: for a long PDF that built every page's
+  // picture again for each page added.
+  $("pages").append(pageTile(p, pages.length - 1));
+  $("recognise").disabled = false;
 }
 
 // Why a picked file can't be used, in words a user can act on.
@@ -1045,24 +1049,23 @@ $("page-zoom-rotate").onclick = async () => {
   $("page-zoom-img").src = zoomed.url;
 };
 
+function pageTile(p, i) {
+  const li = document.createElement("li");
+  li.innerHTML = `<img alt="Page ${i + 1}"><span class="num">${i + 1}</span>
+    <button class="rotate" aria-label="Rotate page ${i + 1}">&#8635;</button>
+    <button class="remove" aria-label="Remove page ${i + 1}">&times;</button>`;
+  li.querySelector("img").src = p.url;
+  li.querySelector("img").onclick = () => openZoom(p);
+  li.querySelector(".rotate").onclick = () => rotatePage(p);
+  li.querySelector(".remove").onclick = () => {
+    URL.revokeObjectURL(p.url);
+    pages.splice(pages.indexOf(p), 1);
+    renderPages();
+  };
+  return li;
+}
 function renderPages() {
-  $("pages").replaceChildren(
-    ...pages.map((p, i) => {
-      const li = document.createElement("li");
-      li.innerHTML = `<img alt="Page ${i + 1}"><span class="num">${i + 1}</span>
-        <button class="rotate" aria-label="Rotate page ${i + 1}">&#8635;</button>
-        <button class="remove" aria-label="Remove page ${i + 1}">&times;</button>`;
-      li.querySelector("img").src = p.url;
-      li.querySelector("img").onclick = () => openZoom(p);
-      li.querySelector(".rotate").onclick = () => rotatePage(p);
-      li.querySelector(".remove").onclick = () => {
-        URL.revokeObjectURL(p.url);
-        pages.splice(i, 1);
-        renderPages();
-      };
-      return li;
-    }),
-  );
+  $("pages").replaceChildren(...pages.map(pageTile));
   $("recognise").disabled = pages.length === 0;
 }
 
@@ -1074,7 +1077,9 @@ async function normalise(blob) {
   const canvas = new OffscreenCanvas(Math.round(bmp.width * scale), Math.round(bmp.height * scale));
   canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
-  return (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer();
+  const png = await canvas.convertToBlob({ type: "image/png" });
+  canvas.width = canvas.height = 0; // its memory back now, not when collected (see pdf-pages.js)
+  return png.arrayBuffer();
 }
 
 // A saved page whose picture the phone has lost can't be read again: say

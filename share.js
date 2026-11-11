@@ -28,7 +28,11 @@ async function asJpeg(blob) {
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
   canvas.getContext("2d").drawImage(bmp, 0, 0);
   bmp.close();
-  return { jpeg: await canvas.convertToBlob({ type: "image/jpeg", quality: PHOTO_QUALITY }), width: canvas.width, height: canvas.height };
+  const out = { jpeg: await canvas.convertToBlob({ type: "image/jpeg", quality: PHOTO_QUALITY }), width: canvas.width, height: canvas.height };
+  // A used canvas keeps its memory until collected, and iPhones run out of
+  // canvas memory first (see pdf-pages.js): give it back now.
+  canvas.width = canvas.height = 0;
+  return out;
 }
 
 // Older files' link (#import=..., gzipped JSON without photos).

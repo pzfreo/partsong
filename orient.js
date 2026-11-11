@@ -112,5 +112,7 @@ async function bitmapToBlob(bmp, degrees, type = "image/jpeg") {
   ctx.rotate((degrees * Math.PI) / 180);
   ctx.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
   bmp.close();
-  return canvas.convertToBlob({ type, quality: 0.92 });
+  const blob = await canvas.convertToBlob({ type, quality: 0.92 });
+  canvas.width = canvas.height = 0; // its memory back now, not when collected (see pdf-pages.js)
+  return blob;
 }
