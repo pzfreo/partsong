@@ -106,6 +106,13 @@ export async function all() {
   return (await run("readonly", (store) => store.getAll())).map(fromStored);
 }
 
+// One score, without loading the rest of the library (each score's photos
+// come out of storage as bytes: a whole library can be hundreds of MB).
+export async function get(id) {
+  const { req } = await run("readonly", (store) => ({ req: store.get(id) }));
+  return req.result ? fromStored(req.result) : undefined;
+}
+
 export async function put(entry) {
   navigator.storage?.persist?.();
   const stored = await toStored(entry);

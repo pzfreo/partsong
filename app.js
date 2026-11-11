@@ -249,7 +249,7 @@ $("report-share").onclick = async () => {
     if (withScore) {
       if (reportPrepared?.id !== current.id) {
         status.textContent = "Preparing the score…";
-        const entry = (await db.all()).find((e) => e.id === current.id) ?? current;
+        const entry = (await db.get(current.id)) ?? current;
         reportPrepared = { id: current.id, file: await scoreFile(entry) };
       }
       file = reportPrepared.file;
@@ -1453,7 +1453,7 @@ async function importScore(entry, received = false) {
 // Before a score first leaves this device (a link, a recording or a PDF), the
 // singer says they're allowed to share the music; asked once per score.
 async function allowedToShare(id) {
-  const entry = (await db.all()).find((e) => e.id === id);
+  const entry = await db.get(id);
   if (!entry || entry.shareAllowed) return true;
   return new Promise((resolve) => {
     const answer = (yes) => {
@@ -1524,7 +1524,7 @@ async function rememberLink(id, shareLink) {
 // audio already made for these settings), and plain when it has to prepare.
 async function updateShareReady() {
   if (!current) return;
-  const entry = liveEntry((await db.all()).find((e) => e.id === current.id));
+  const entry = liveEntry(await db.get(current.id));
   $("share-score").classList.toggle("ready", !!(entry && (await reusableLink(entry))));
   $("share-audio").classList.toggle("ready", !!preparedAudio && preparedAudio.key === audioKey());
 }
@@ -1534,7 +1534,7 @@ async function shareScore(id, button, status, label) {
   button.disabled = true;
   try {
     if (prepared?.id !== id) {
-      const entry = liveEntry((await db.all()).find((e) => e.id === id));
+      const entry = liveEntry(await db.get(id));
       const key = await shareKey(entry);
       // Unchanged since it was last shared: the same link, straight away.
       const kept = await reusableLink(entry, key);
@@ -1607,13 +1607,14 @@ function audioKey() {
   return JSON.stringify([current?.id, playSegments(), current.mine, current.manual, current.excluded, current.octave, othersGain, $("instrument").value, $("tempo").value]);
 }
 // A prepared file that no longer matches the settings is dropped.
-function updateAudioButton() {
+function updateAudioButton(checkLink = true) {
   if (preparedAudio && preparedAudio.key !== audioKey()) {
     preparedAudio = null;
     clearTimeout($("share-audio").revert);
     $("share-audio").textContent = SHARE_AUDIO;
+    $("share-audio").classList.remove("ready");
   }
-  updateShareReady();
+  if (checkLink) updateShareReady();
 }
 $("share-audio").onclick = async () => {
   if (!(await allowedToShare(current.id))) return;
@@ -1659,7 +1660,7 @@ $("export-pdf").onclick = async () => {
   const say = shareReporter(button, null, EXPORT_PDF);
   button.disabled = true;
   try {
-    const entry = liveEntry((await db.all()).find((e) => e.id === current.id));
+    const entry = liveEntry(await db.get(current.id));
     const key = `${entry.id} ${await shareKey(entry)}`;
     if (preparedPdf?.key !== key) {
       say("busy", "", "Preparing…");
@@ -1683,7 +1684,7 @@ $("export-pdf").onclick = async () => {
 // "Title (2)", added to the list (rename it when you open it), e.g. to mark up
 // first and second sopranos as separate scores.
 async function copyScore(id) {
-  const original = (await db.all()).find((e) => e.id === id);
+  const original = await db.get(id);
   const copy = await asNewScore({ ...original, id: crypto.randomUUID(), created: Date.now(), locked: false });
   await db.put(copy);
   await renderLibrary();
@@ -2708,7 +2709,10 @@ for (const q of document.querySelectorAll(".q")) {
   };
 }
 // A change to anything that's heard means the audio needs preparing again.
-for (const type of ["input", "change"]) $("panel").addEventListener(type, () => current && updateAudioButton());
+// The link check reads the score from storage, so only once a change is made
+// (a slider let go), not for every step of a drag.
+$("panel").addEventListener("input", () => current && updateAudioButton(false));
+$("panel").addEventListener("change", () => current && updateAudioButton());
 $("panel-close").onclick = () => setPanel(false);
 $("panel-backdrop").onclick = () => setPanel(false);
 
