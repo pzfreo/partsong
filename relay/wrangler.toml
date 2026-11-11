@@ -1,8 +1,8 @@
 # Partsong's share relay: holds encrypted copies of shared scores so a link can
 # bring the whole score (photos included) to Safari, Chrome or the installed
 # app. Deploy: npx wrangler deploy (from this directory). Copies are deleted a
-# year after upload by the bucket's lifecycle rule:
-#   npx wrangler r2 bucket lifecycle add partsong-shares expire-1y --expire-days 365
+# month after upload by the bucket's lifecycle rule (was a year until 11 Nov 2026):
+#   npx wrangler r2 bucket lifecycle add partsong-shares expire-30d --expire-days 30
 name = "partsong-relay"
 main = "index.js"
 compatibility_date = "2026-10-01"

@@ -3,6 +3,8 @@
 // Run against http://localhost:8765/index.html.
 // These test the PDF share: with no relay reachable, a share offers it
 // (Send as a PDF instead).
+// Say yes to "Are you allowed to share this music?" (tests/drive-share-rights.js tests it).
+new MutationObserver(() => { if (!document.getElementById("rights").hidden) document.getElementById("rights-yes").click(); }).observe(document.getElementById("rights"), { attributes: true });
 localStorage.setItem("partsong.relay", "http://localhost:9");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(100); } throw new Error("timeout waiting for " + label); };

@@ -1,5 +1,7 @@
 // Export PDF saves the score as a .partsong.pdf (a download on desktop) that
 // Open PDF brings back as the same score. Run against http://localhost:8765/index.html.
+// Say yes to "Are you allowed to share this music?" (tests/drive-share-rights.js tests it).
+new MutationObserver(() => { if (!document.getElementById("rights").hidden) document.getElementById("rights-yes").click(); }).observe(document.getElementById("rights"), { attributes: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(300); } throw new Error("timeout waiting for " + label); };
 const $ = (id) => document.getElementById(id);

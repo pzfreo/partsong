@@ -89,7 +89,7 @@ then *Add to Home screen*.
   browsers never send, so the relay can't read scores. Tapping the link fetches
   and decrypts it and asks before adding, the same in Safari, Chrome or the
   installed app (also when Partsong is already open: `hashchange`). If the
-  upload fails, the PDF is shared instead; if a link has expired (a year, by
+  upload fails, the PDF is shared instead; if a link has expired (a month, by
   the bucket's lifecycle rule) or the relay is down, the app says so and what
   to do. `tests/drive-relay.js` (needs `wrangler dev`, see
   its header). The relay only accepts uploads from partsong.app, up to 40 MB,
