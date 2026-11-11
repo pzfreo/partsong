@@ -89,11 +89,25 @@ then *Add to Home screen*.
   browsers never send, so the relay can't read scores. Tapping the link fetches
   and decrypts it and asks before adding, the same in Safari, Chrome or the
   installed app (also when Partsong is already open: `hashchange`). If the
-  upload fails, the PDF is shared instead; if a link has expired (a month, by
+  upload fails, the PDF is shared instead; if a link has expired (promised for a month, deleted after 60 days by
   the bucket's lifecycle rule) or the relay is down, the app says so and what
   to do. `tests/drive-relay.js` (needs `wrangler dev`, see
   its header). The relay only accepts uploads from partsong.app, up to 40 MB,
   starting with the app's marker, and never overwrites.
+- **Takedown requests**: the terms (`terms.html#your-music`, Sharing links)
+  tell copyright owners to email bugs@partsong.app with the link of a shared
+  copy they haven't allowed. The relay can't read a copy (the key is only in
+  the link), so a request is handled by the link, not by looking at content:
+  1. The link looks like `https://partsong.app/#s=<id>.<key>`: the copy's name
+     in the bucket is `<id>`, the 22 characters between `s=` and the dot. Never
+     ask for, keep or use the key.
+  2. Delete it: `cd relay && npx wrangler r2 object delete partsong-shares/<id> --remote`
+  3. Check it's gone: `curl -s -o /dev/null -w "%{http_code}\n" https://partsong-relay.paul-8e3.workers.dev/s/<id>`
+     gives 404 (the app then says the link has expired).
+  4. Reply to the sender that it's removed, and keep a note of the date, the
+     id and who asked (not the key), in case the same person shares it again.
+  Uploads are deleted after 60 days anyway (the bucket's lifecycle rule, see
+  `relay/wrangler.toml`).
 - **Share audio** (`audio.js`, `Player.render`): a score's settings can share
   what Play plays (bars, repeats, your part or marked part, the others' volume,
   sound, tempo, pitch) as an audio file, rendered offline in a few seconds:
