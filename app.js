@@ -410,7 +410,13 @@ function filterLibrary() {
 $("library-search").oninput = filterLibrary;
 
 async function renderLibrary() {
-  const lib = await db.all().catch(() => []);
+  // A list of rows, not the scores: a row fetches its score when it's tapped.
+  let lib = [];
+  try {
+    lib = await db.list(true);
+  } catch (e) {
+    $("library-status").textContent = `Couldn't open your scores (${e?.message || e?.name || "storage error"}). Close Partsong and open it again.`;
+  }
   $("library-search").hidden = lib.length < SEARCH_FROM;
   if (lib.length < SEARCH_FROM) $("library-search").value = "";
   releasePhotos("library");
@@ -427,21 +433,25 @@ async function renderLibrary() {
         li.dataset.id = entry.id;
         li.dataset.title = entry.title;
         const b = document.createElement("button");
-        const n = entry.pages.length;
-        const done = entry.pages.filter(Boolean).length;
-        const marked = Object.keys(entry.manual ?? {}).length;
+        const n = entry.nPages;
+        const done = entry.nDone;
+        const marked = entry.nMarked;
         const info = entry.pending
           ? `Reading… ${done} of ${n}`
           : `${n} page${n > 1 ? "s" : ""}${marked ? ` · ${marked} system${marked > 1 ? "s" : ""} marked` : ""}${entry.readSeconds ? ` · read in ${duration(entry.readSeconds)}` : ""}`;
         b.innerHTML = `<span class="thumb"></span><span class="meta"><span class="name"></span><small>${info}</small></span>`;
         b.querySelector(".name").textContent = (entry.locked ? "🔒 " : "") + entry.title;
-        if (entry.images?.length) {
+        if (entry.thumb) {
           const img = document.createElement("img");
           img.alt = "";
-          img.src = photoUrl("library", entry.images[0]);
+          img.src = photoUrl("library", entry.thumb);
           b.querySelector(".thumb").append(img);
         }
-        b.onclick = () => (entry.pending ? resumeScan(entry) : openScore(entry));
+        b.onclick = async () => {
+          const full = await db.get(entry.id).catch(() => null);
+          if (!full) return renderLibrary(); // gone (deleted in another tab)
+          full.pending ? resumeScan(full) : openScore(full);
+        };
         li.append(b);
         if (!entry.pending) {
           const copy = document.createElement("button");
@@ -777,7 +787,7 @@ async function countReturn() {
     const use = { first: was?.first ?? today, last: today, days: (was?.days ?? 0) + 1 };
     localStorage.setItem(USE_DAYS, JSON.stringify(use));
     const since = Math.round((Date.parse(today) - Date.parse(use.first)) / 864e5);
-    const scores = (await db.all().catch(() => [])).filter((e) => !e.pending).length;
+    const scores = (await db.list().catch(() => [])).filter((e) => !e.pending).length;
     track(`use: day ${group(use.days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
     track(`use: first ${since === 0 ? "today" : since < 7 ? "1–6 days ago" : since < 28 ? "1–4 weeks ago" : since < 91 ? "1–3 months ago" : "3+ months ago"}`);
     track(`library: ${group(scores, [1, 2, 3, 4, 6, 11, 21, 51])} scores`);
@@ -881,14 +891,17 @@ const reloadedScan = (() => {
   }
 })();
 async function resumeUnfinished() {
-  const all = await db.all().catch(() => []);
+  // The list, then only the scan to carry on with: this runs just after a
+  // phone has closed the page for using too much memory.
+  const all = await db.list().catch(() => []);
+  const full = async (row) => (row && (await db.get(row.id).catch(() => null))) || null;
   // After the reload for threads: the scan that was tapped, not counted as a restart.
-  const tapped = reloadedScan && all.find((e) => e.id === reloadedScan && e.pending);
+  const tapped = await full(reloadedScan && all.find((e) => e.id === reloadedScan && e.pending));
   if (tapped) {
     track(`read-reloaded-for-threads (${deviceTag}): ${self.crossOriginIsolated ? "isolated" : "still not isolated"}`);
     return resumeScan(tapped);
   }
-  const entry = all.find((e) => e.pending && !e.stopped);
+  const entry = await full(all.find((e) => e.pending && !e.stopped));
   const resumes = entry?.resumes ?? 0;
   if (!entry || resumes > 2) return;
   await db.update(entry.id, { resumes: resumes + 1 }).catch(() => {});
@@ -1430,7 +1443,7 @@ async function openFiles(files) {
 // Imports never overwrite: a score already here (same id or same name) is
 // kept, and the new one gets a fresh id and a numbered name, "Title (2)".
 async function asNewScore(entry) {
-  const lib = await db.all();
+  const lib = await db.list();
   if (lib.some((e) => e.id === entry.id)) entry.id = crypto.randomUUID();
   const titles = new Set(lib.map((e) => e.title));
   const base = entry.title;
