@@ -289,8 +289,12 @@ export function parseScoreFile(text) {
     return null;
   }
   if (doc?.format !== FORMAT || !Array.isArray(doc.pages)) return null;
+  // Only the settings a share carries, whatever else the file says (a field
+  // such as pending would make it a scan to carry on reading at each launch).
+  const settings = Object.fromEntries(SETTINGS.filter((k) => doc.settings?.[k] !== undefined).map((k) => [k, doc.settings[k]]));
+  if (!Array.isArray(settings.excluded)) delete settings.excluded;
   return {
-    ...doc.settings,
+    ...settings,
     id: doc.id || crypto.randomUUID(),
     title: doc.title || "Shared score",
     created: doc.created || Date.now(),
