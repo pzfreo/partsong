@@ -892,8 +892,11 @@ async function resumeUnfinished() {
   const resumes = entry?.resumes ?? 0;
   if (!entry || resumes > 2) return;
   await db.update(entry.id, { resumes: resumes + 1 }).catch(() => {});
-  if (resumes === 2) return track(`read-gave-up (${deviceTag})`); // once
-  track(`read-restarted (${deviceTag})`);
+  // Where it was: a page's progress resets the count, so a give-up is one page killed three times.
+  const n = entry.images?.length ?? 0;
+  const at = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
+  if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
+  track(`read-restarted (${deviceTag}): ${at}`);
   resumeScan({ ...entry, resumes: resumes + 1 }); // as just saved: readScan's save keeps it
 }
 
