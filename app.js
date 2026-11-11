@@ -249,8 +249,7 @@ $("report-share").onclick = async () => {
     if (withScore) {
       if (reportPrepared?.id !== current.id) {
         status.textContent = "Preparing the score…";
-        const entry = (await db.get(current.id)) ?? current;
-        reportPrepared = { id: current.id, file: await scoreFile(entry) };
+        reportPrepared = { id: current.id, file: await scoreFile(liveEntry(current)) };
       }
       file = reportPrepared.file;
     }
@@ -1466,7 +1465,7 @@ async function importScore(entry, received = false) {
 // Before a score first leaves this device (a link, a recording or a PDF), the
 // singer says they're allowed to share the music; asked once per score.
 async function allowedToShare(id) {
-  const entry = await db.get(id);
+  const entry = await stored(id);
   if (!entry || entry.shareAllowed) return true;
   return new Promise((resolve) => {
     const answer = (yes) => {
@@ -1516,6 +1515,9 @@ let prepared = null; // { id, file, link, title }
 // matches (same fingerprint) and has time to run on the relay.
 // A stored score with the open score's live settings on top (tempo and the
 // others' volume are only saved when a slider is let go).
+// A score as stored: the open score is already in memory (its settings are
+// kept in step as they're saved), so it isn't read again, photos and all.
+const stored = async (id) => (id === current?.id ? current : db.get(id));
 function liveEntry(entry) {
   if (!entry || entry.id !== current?.id) return entry;
   const live = { ...entry, tempo: Number($("tempo").value), others: Number($("others").value) };
@@ -1537,7 +1539,7 @@ async function rememberLink(id, shareLink) {
 // audio already made for these settings), and plain when it has to prepare.
 async function updateShareReady() {
   if (!current) return;
-  const entry = liveEntry(await db.get(current.id));
+  const entry = liveEntry(current);
   $("share-score").classList.toggle("ready", !!(entry && (await reusableLink(entry))));
   $("share-audio").classList.toggle("ready", !!preparedAudio && preparedAudio.key === audioKey());
 }
@@ -1547,7 +1549,7 @@ async function shareScore(id, button, status, label) {
   button.disabled = true;
   try {
     if (prepared?.id !== id) {
-      const entry = liveEntry(await db.get(id));
+      const entry = liveEntry(await stored(id));
       const key = await shareKey(entry);
       // Unchanged since it was last shared: the same link, straight away.
       const kept = await reusableLink(entry, key);
@@ -1673,7 +1675,7 @@ $("export-pdf").onclick = async () => {
   const say = shareReporter(button, null, EXPORT_PDF);
   button.disabled = true;
   try {
-    const entry = liveEntry(await db.get(current.id));
+    const entry = liveEntry(current);
     const key = `${entry.id} ${await shareKey(entry)}`;
     if (preparedPdf?.key !== key) {
       say("busy", "", "Preparing…");
