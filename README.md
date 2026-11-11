@@ -286,7 +286,7 @@ downloads don't allow cross-origin fetches, so they're served with the site).
 
 ## Licence
 
-© 2026 Paul Fremantle. Partsong is free software under the GNU Affero General
+© 2026 Betwixt Limited. Partsong is free software under the GNU Affero General
 Public License v3.0 (see `LICENSE`); it has to be, as it distributes homr. The
 app's About page links here, which is the offer of source to its users.
 
