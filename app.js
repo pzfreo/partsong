@@ -563,7 +563,7 @@ function startWorker() {
       reject(err);
     };
   });
-  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, noGpu: lowMemory, threads: tunedThreads(), gpu: tunedGpu() });
+  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, noGpu: lowMemory, ios: iDevice, threads: tunedThreads(), gpu: tunedGpu() });
 }
 
 // The exact encoder's thread count, measured once on this device (see tune()
