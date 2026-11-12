@@ -563,7 +563,7 @@ function startWorker() {
       reject(err);
     };
   });
-  worker.postMessage({ type: "init", exact: exactEncoder(), threads: tunedThreads(), gpu: tunedGpu() });
+  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, noGpu: lowMemory, threads: tunedThreads(), gpu: tunedGpu() });
 }
 
 // The exact encoder's thread count, measured once on this device (see tune()
@@ -900,6 +900,13 @@ const reloadedScan = (() => {
     return null;
   }
 })();
+// After the phone has closed the page during a read, the rest of this
+// session's reading uses less memory: homr-rs's own encoder on the CPU in
+// place of onnxruntime's, and no WebGPU. iPhone simulator, one photo page,
+// the page closed at 820 MB as iOS would: read at the second attempt in 3
+// runs of 3 (about 30 s; peak about 715 MB), where the usual reader was
+// closed every time and never finished.
+let lowMemory = false;
 async function resumeUnfinished() {
   // The list, then only the scan to carry on with: this runs just after a
   // phone has closed the page for using too much memory.
@@ -920,6 +927,8 @@ async function resumeUnfinished() {
   const at = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
   if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
   track(`read-restarted (${deviceTag}): ${at}`);
+  lowMemory = true;
+  if (worker) resetWorker(); // started without it (prefetch)
   resumeScan({ ...entry, resumes: resumes + 1 }); // as just saved: readScan's save keeps it
 }
 
@@ -1357,7 +1366,7 @@ async function readScan() {
     remember(readerLog, `Read ${plural(pages.length, "page")} in ${duration(secs)}${fresh ? "" : " (carried on from an earlier read)"}`, 40);
     setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${pages.length} page${pages.length === 1 ? "" : "s"}`);
-    track(`read-ok (${deviceTag})`);
+    track(`read-ok (${deviceTag})${lowMemory ? ": low memory" : ""}`);
     if (!rereading && !scanSettings.sample) countRead();
   } catch (e) {
     pageLabel = "";
