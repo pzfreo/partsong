@@ -113,8 +113,19 @@ function show(name, nav = "push") {
   window.scrollTo(0, 0);
 }
 
+// Every history entry says how many entries it is from home, so the header's
+// Back gets there in one step whatever led here: Read again, Fix systems and
+// an import put a screen on top of an open score and its panel, and Back
+// (which assumed one or two entries) landed on the panel instead.
+{
+  const push = history.pushState.bind(history);
+  const replace = history.replaceState.bind(history);
+  history.pushState = (state, ...rest) => push({ ...state, depth: (history.state?.depth ?? 0) + 1 }, ...rest);
+  history.replaceState = (state, ...rest) => replace(state && { ...state, depth: history.state?.depth ?? (state.screen ? 1 : 0) }, ...rest);
+}
 function goHome() {
-  const depth = history.state?.panel || history.state?.markup ? 2 : history.state?.screen ? 1 : 0;
+  // (Entries from before they were counted: the panel or mark-up is two from home.)
+  const depth = history.state?.depth ?? (history.state?.panel || history.state?.markup ? 2 : history.state?.screen ? 1 : 0);
   if (depth) history.go(-depth);
   else show("home", "none");
 }
