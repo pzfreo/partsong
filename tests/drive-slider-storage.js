@@ -3,7 +3,8 @@
 // which loaded every score with its photos (stored as bytes): with a library
 // of photographed scores, a drag on an iPhone ran out of memory and Safari
 // closed the page ("A problem repeatedly occurred", v273). Now a drag reads
-// nothing, letting go reads just this score, and the link check still works.
+// nothing, and letting go only saves the setting (update reads the record to
+// write it back: one get); the link check uses the open score, not storage.
 //   node scripts/headless-test.mjs http://localhost:8765/index.html out.json 60 tests/drive-slider-storage.js
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(300); } throw new Error("timeout waiting for " + label); };
@@ -48,5 +49,5 @@ const r = {
   others: $("others-val").textContent,
   shareReady: $("share-score").classList.contains("ready"), // stale key: not reusable
 };
-r.ok = drag.getAll === 0 && drag.get === 0 && release.getAll === 0 && release.get <= 2 && tick.getAll === 0 && tick.get <= 3 && r.others === "0%" && r.shareReady === false;
+r.ok = drag.getAll === 0 && drag.get === 0 && release.getAll === 0 && release.get <= 1 && tick.getAll === 0 && tick.get <= 1 && r.others === "0%" && r.shareReady === false;
 window.result = r;

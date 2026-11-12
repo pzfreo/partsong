@@ -113,8 +113,19 @@ function show(name, nav = "push") {
   window.scrollTo(0, 0);
 }
 
+// Every history entry says how many entries it is from home, so the header's
+// Back gets there in one step whatever led here: Read again, Fix systems and
+// an import put a screen on top of an open score and its panel, and Back
+// (which assumed one or two entries) landed on the panel instead.
+{
+  const push = history.pushState.bind(history);
+  const replace = history.replaceState.bind(history);
+  history.pushState = (state, ...rest) => push({ ...state, depth: (history.state?.depth ?? 0) + 1 }, ...rest);
+  history.replaceState = (state, ...rest) => replace(state && { ...state, depth: history.state?.depth ?? (state.screen ? 1 : 0) }, ...rest);
+}
 function goHome() {
-  const depth = history.state?.panel || history.state?.markup ? 2 : history.state?.screen ? 1 : 0;
+  // (Entries from before they were counted: the panel or mark-up is two from home.)
+  const depth = history.state?.depth ?? (history.state?.panel || history.state?.markup ? 2 : history.state?.screen ? 1 : 0);
   if (depth) history.go(-depth);
   else show("home", "none");
 }
@@ -249,8 +260,7 @@ $("report-share").onclick = async () => {
     if (withScore) {
       if (reportPrepared?.id !== current.id) {
         status.textContent = "Preparing the score…";
-        const entry = (await db.get(current.id)) ?? current;
-        reportPrepared = { id: current.id, file: await scoreFile(entry) };
+        reportPrepared = { id: current.id, file: await scoreFile(liveEntry(current)) };
       }
       file = reportPrepared.file;
     }
@@ -410,7 +420,13 @@ function filterLibrary() {
 $("library-search").oninput = filterLibrary;
 
 async function renderLibrary() {
-  const lib = await db.all().catch(() => []);
+  // A list of rows, not the scores: a row fetches its score when it's tapped.
+  let lib = [];
+  try {
+    lib = await db.list(true);
+  } catch (e) {
+    $("library-status").textContent = `Couldn't open your scores (${e?.message || e?.name || "storage error"}). Close Partsong and open it again.`;
+  }
   $("library-search").hidden = lib.length < SEARCH_FROM;
   if (lib.length < SEARCH_FROM) $("library-search").value = "";
   releasePhotos("library");
@@ -427,21 +443,25 @@ async function renderLibrary() {
         li.dataset.id = entry.id;
         li.dataset.title = entry.title;
         const b = document.createElement("button");
-        const n = entry.pages.length;
-        const done = entry.pages.filter(Boolean).length;
-        const marked = Object.keys(entry.manual ?? {}).length;
+        const n = entry.nPages;
+        const done = entry.nDone;
+        const marked = entry.nMarked;
         const info = entry.pending
           ? `Reading… ${done} of ${n}`
           : `${n} page${n > 1 ? "s" : ""}${marked ? ` · ${marked} system${marked > 1 ? "s" : ""} marked` : ""}${entry.readSeconds ? ` · read in ${duration(entry.readSeconds)}` : ""}`;
         b.innerHTML = `<span class="thumb"></span><span class="meta"><span class="name"></span><small>${info}</small></span>`;
         b.querySelector(".name").textContent = (entry.locked ? "🔒 " : "") + entry.title;
-        if (entry.images?.length) {
+        if (entry.thumb) {
           const img = document.createElement("img");
           img.alt = "";
-          img.src = photoUrl("library", entry.images[0]);
+          img.src = photoUrl("library", entry.thumb);
           b.querySelector(".thumb").append(img);
         }
-        b.onclick = () => (entry.pending ? resumeScan(entry) : openScore(entry));
+        b.onclick = async () => {
+          const full = await db.get(entry.id).catch(() => null);
+          if (!full) return renderLibrary(); // gone (deleted in another tab)
+          full.pending ? resumeScan(full) : openScore(full);
+        };
         li.append(b);
         if (!entry.pending) {
           const copy = document.createElement("button");
@@ -543,7 +563,7 @@ function startWorker() {
       reject(err);
     };
   });
-  worker.postMessage({ type: "init", exact: exactEncoder(), threads: tunedThreads(), gpu: tunedGpu() });
+  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, noGpu: lowMemory, threads: tunedThreads(), gpu: tunedGpu() });
 }
 
 // The exact encoder's thread count, measured once on this device (see tune()
@@ -777,7 +797,7 @@ async function countReturn() {
     const use = { first: was?.first ?? today, last: today, days: (was?.days ?? 0) + 1 };
     localStorage.setItem(USE_DAYS, JSON.stringify(use));
     const since = Math.round((Date.parse(today) - Date.parse(use.first)) / 864e5);
-    const scores = (await db.all().catch(() => [])).filter((e) => !e.pending).length;
+    const scores = (await db.list().catch(() => [])).filter((e) => !e.pending).length;
     track(`use: day ${group(use.days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
     track(`use: first ${since === 0 ? "today" : since < 7 ? "1–6 days ago" : since < 28 ? "1–4 weeks ago" : since < 91 ? "1–3 months ago" : "3+ months ago"}`);
     track(`library: ${group(scores, [1, 2, 3, 4, 6, 11, 21, 51])} scores`);
@@ -880,15 +900,25 @@ const reloadedScan = (() => {
     return null;
   }
 })();
+// After the phone has closed the page during a read, the rest of this
+// session's reading uses less memory: homr-rs's own encoder on the CPU in
+// place of onnxruntime's, and no WebGPU. iPhone simulator, one photo page,
+// the page closed at 820 MB as iOS would: read at the second attempt in 3
+// runs of 3 (about 30 s; peak about 715 MB), where the usual reader was
+// closed every time and never finished.
+let lowMemory = false;
 async function resumeUnfinished() {
-  const all = await db.all().catch(() => []);
+  // The list, then only the scan to carry on with: this runs just after a
+  // phone has closed the page for using too much memory.
+  const all = await db.list().catch(() => []);
+  const full = async (row) => (row && (await db.get(row.id).catch(() => null))) || null;
   // After the reload for threads: the scan that was tapped, not counted as a restart.
-  const tapped = reloadedScan && all.find((e) => e.id === reloadedScan && e.pending);
+  const tapped = await full(reloadedScan && all.find((e) => e.id === reloadedScan && e.pending));
   if (tapped) {
     track(`read-reloaded-for-threads (${deviceTag}): ${self.crossOriginIsolated ? "isolated" : "still not isolated"}`);
     return resumeScan(tapped);
   }
-  const entry = all.find((e) => e.pending && !e.stopped);
+  const entry = await full(all.find((e) => e.pending && !e.stopped));
   const resumes = entry?.resumes ?? 0;
   if (!entry || resumes > 2) return;
   await db.update(entry.id, { resumes: resumes + 1 }).catch(() => {});
@@ -897,6 +927,8 @@ async function resumeUnfinished() {
   const at = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
   if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
   track(`read-restarted (${deviceTag}): ${at}`);
+  lowMemory = true;
+  if (worker) resetWorker(); // started without it (prefetch)
   resumeScan({ ...entry, resumes: resumes + 1 }); // as just saved: readScan's save keeps it
 }
 
@@ -948,8 +980,12 @@ async function addPage(image) {
   // after the app was in the background), and an upright photo is kept as is.
   const copy = new Blob([await image.arrayBuffer()], { type: image.type });
   const blob = await uprightPhoto(copy);
-  pages.push({ blob, url: URL.createObjectURL(blob) });
-  renderPages();
+  const p = { blob, url: URL.createObjectURL(blob) };
+  pages.push(p);
+  // One tile more, not the grid again: for a long PDF that built every page's
+  // picture again for each page added.
+  $("pages").append(pageTile(p, pages.length - 1));
+  $("recognise").disabled = false;
 }
 
 // Why a picked file can't be used, in words a user can act on.
@@ -1033,24 +1069,23 @@ $("page-zoom-rotate").onclick = async () => {
   $("page-zoom-img").src = zoomed.url;
 };
 
+function pageTile(p, i) {
+  const li = document.createElement("li");
+  li.innerHTML = `<img alt="Page ${i + 1}"><span class="num">${i + 1}</span>
+    <button class="rotate" aria-label="Rotate page ${i + 1}">&#8635;</button>
+    <button class="remove" aria-label="Remove page ${i + 1}">&times;</button>`;
+  li.querySelector("img").src = p.url;
+  li.querySelector("img").onclick = () => openZoom(p);
+  li.querySelector(".rotate").onclick = () => rotatePage(p);
+  li.querySelector(".remove").onclick = () => {
+    URL.revokeObjectURL(p.url);
+    pages.splice(pages.indexOf(p), 1);
+    renderPages();
+  };
+  return li;
+}
 function renderPages() {
-  $("pages").replaceChildren(
-    ...pages.map((p, i) => {
-      const li = document.createElement("li");
-      li.innerHTML = `<img alt="Page ${i + 1}"><span class="num">${i + 1}</span>
-        <button class="rotate" aria-label="Rotate page ${i + 1}">&#8635;</button>
-        <button class="remove" aria-label="Remove page ${i + 1}">&times;</button>`;
-      li.querySelector("img").src = p.url;
-      li.querySelector("img").onclick = () => openZoom(p);
-      li.querySelector(".rotate").onclick = () => rotatePage(p);
-      li.querySelector(".remove").onclick = () => {
-        URL.revokeObjectURL(p.url);
-        pages.splice(i, 1);
-        renderPages();
-      };
-      return li;
-    }),
-  );
+  $("pages").replaceChildren(...pages.map(pageTile));
   $("recognise").disabled = pages.length === 0;
 }
 
@@ -1062,7 +1097,9 @@ async function normalise(blob) {
   const canvas = new OffscreenCanvas(Math.round(bmp.width * scale), Math.round(bmp.height * scale));
   canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
-  return (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer();
+  const png = await canvas.convertToBlob({ type: "image/png" });
+  canvas.width = canvas.height = 0; // its memory back now, not when collected (see pdf-pages.js)
+  return png.arrayBuffer();
 }
 
 // A saved page whose picture the phone has lost can't be read again: say
@@ -1169,6 +1206,7 @@ async function checkSystems(stopped) {
     pageLabel = "";
     $("systems-check").hidden = true;
     $("recognise").hidden = false;
+    $("check-list").replaceChildren(); // its full-size page pictures aren't kept
   }
   scanSettings.systemsChecked = true;
   // Reading again: the saved score stays as it was until the new reading is saved.
@@ -1291,6 +1329,7 @@ async function readScan() {
     // to check (the reader may group them differently now).
     if (!scanSettings.systemsChecked) await checkSystems(stopped);
     $("read-step").hidden = false;
+    let dropped = false;
     for (let i = 0; i < pages.length; i++) {
       if (pages[i].xml) continue;
       pageLabel = `Page ${i + 1} of ${pages.length}`;
@@ -1313,9 +1352,13 @@ async function readScan() {
         }
         renderPages();
         i--;
+        dropped = true;
       }
       scanResumes = 0; // progress
-      if (saved) await db.update(scanId, { images: pages.map((p) => p.blob), pages: pages.map((p) => p.xml ?? null), found: foundLayouts(), resumes: 0 }).catch(() => {});
+      // The photos are stored already: written again only when a page was
+      // left out (every page's bytes, copied and rewritten for each page read).
+      if (saved) await db.update(scanId, { ...(dropped ? { images: pages.map((p) => p.blob) } : {}), pages: pages.map((p) => p.xml ?? null), found: foundLayouts(), resumes: 0 }).catch(() => {});
+      dropped = false;
     }
     pageLabel = "";
     const secs = Math.round((performance.now() - t0) / 1000);
@@ -1323,7 +1366,7 @@ async function readScan() {
     remember(readerLog, `Read ${plural(pages.length, "page")} in ${duration(secs)}${fresh ? "" : " (carried on from an earlier read)"}`, 40);
     setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${pages.length} page${pages.length === 1 ? "" : "s"}`);
-    track(`read-ok (${deviceTag})`);
+    track(`read-ok (${deviceTag})${lowMemory ? ": low memory" : ""}`);
     if (!rereading && !scanSettings.sample) countRead();
   } catch (e) {
     pageLabel = "";
@@ -1339,6 +1382,9 @@ async function readScan() {
       );
       return;
     }
+    // Not carried on by itself either: it would fail the same way at each
+    // launch, and be counted as the phone closing the page (read-gave-up).
+    if (saved) await db.update(scanId, { stopped: true }).catch(() => {});
     // onnxruntime that didn't start won't in this reader: the next read gets a new one.
     if (/no available backend found|initWasm/.test(e.message)) resetWorker();
     track("read-failed");
@@ -1373,6 +1419,9 @@ async function readScan() {
   entry.readBy = { version: SHOWN_VERSION, device: deviceKind, browser: ua, at: Date.now() };
   saved = await db.put(entry).then(() => true, () => false);
   if (!saved) setPageStatus("Read OK, but couldn't save it on this phone (storage full?).");
+  // The reader isn't kept while the score is practised (its models and
+  // working memory are hundreds of MB); the next read loads it from storage.
+  resetWorker();
   scanId = null;
   rereading = false;
   // If they've gone back to the library meanwhile, it's just added there.
@@ -1388,6 +1437,14 @@ $("open-xml").onchange = async (e) => {
 
 // Score files (shared from Partsong) and MusicXML, from the picker or the
 // share sheet; an ordinary PDF starts a new scan.
+// A scan to look over can't be loaded while another is being read: its pages
+// would replace the ones the read is working through. Shows that read instead.
+function busyReading() {
+  if (!reading) return false;
+  show("scan");
+  showNotice("Partsong is still reading a score. Open the file again when it's done.");
+  return true;
+}
 async function openFiles(files) {
   try {
     const xmls = [];
@@ -1415,7 +1472,7 @@ async function openFiles(files) {
     }
     // An ordinary PDF is sheet music to read: its pages, to look over before
     // Read music (step 1 of 3, as with photos).
-    if (pdfs.length) {
+    if (pdfs.length && !busyReading()) {
       loadScan();
       if ((await addFiles(pdfs)) && pages.length) setPageStatus("Check the pages, then tap Read music.");
     }
@@ -1430,7 +1487,7 @@ async function openFiles(files) {
 // Imports never overwrite: a score already here (same id or same name) is
 // kept, and the new one gets a fresh id and a numbered name, "Title (2)".
 async function asNewScore(entry) {
-  const lib = await db.all();
+  const lib = await db.list();
   if (lib.some((e) => e.id === entry.id)) entry.id = crypto.randomUUID();
   const titles = new Set(lib.map((e) => e.title));
   const base = entry.title;
@@ -1453,7 +1510,7 @@ async function importScore(entry, received = false) {
 // Before a score first leaves this device (a link, a recording or a PDF), the
 // singer says they're allowed to share the music; asked once per score.
 async function allowedToShare(id) {
-  const entry = await db.get(id);
+  const entry = await stored(id);
   if (!entry || entry.shareAllowed) return true;
   return new Promise((resolve) => {
     const answer = (yes) => {
@@ -1503,6 +1560,9 @@ let prepared = null; // { id, file, link, title }
 // matches (same fingerprint) and has time to run on the relay.
 // A stored score with the open score's live settings on top (tempo and the
 // others' volume are only saved when a slider is let go).
+// A score as stored: the open score is already in memory (its settings are
+// kept in step as they're saved), so it isn't read again, photos and all.
+const stored = async (id) => (id === current?.id ? current : db.get(id));
 function liveEntry(entry) {
   if (!entry || entry.id !== current?.id) return entry;
   const live = { ...entry, tempo: Number($("tempo").value), others: Number($("others").value) };
@@ -1524,7 +1584,7 @@ async function rememberLink(id, shareLink) {
 // audio already made for these settings), and plain when it has to prepare.
 async function updateShareReady() {
   if (!current) return;
-  const entry = liveEntry(await db.get(current.id));
+  const entry = liveEntry(current);
   $("share-score").classList.toggle("ready", !!(entry && (await reusableLink(entry))));
   $("share-audio").classList.toggle("ready", !!preparedAudio && preparedAudio.key === audioKey());
 }
@@ -1534,7 +1594,7 @@ async function shareScore(id, button, status, label) {
   button.disabled = true;
   try {
     if (prepared?.id !== id) {
-      const entry = liveEntry(await db.get(id));
+      const entry = liveEntry(await stored(id));
       const key = await shareKey(entry);
       // Unchanged since it was last shared: the same link, straight away.
       const kept = await reusableLink(entry, key);
@@ -1660,7 +1720,7 @@ $("export-pdf").onclick = async () => {
   const say = shareReporter(button, null, EXPORT_PDF);
   button.disabled = true;
   try {
-    const entry = liveEntry(await db.get(current.id));
+    const entry = liveEntry(current);
     const key = `${entry.id} ${await shareKey(entry)}`;
     if (preparedPdf?.key !== key) {
       say("busy", "", "Preparing…");
@@ -1809,6 +1869,7 @@ async function openInbox() {
   if (!keys.length) return;
   const scans = [];
   const others = [];
+  let waiting = false;
   for (const req of keys) {
     const res = await cache.match(req);
     const name = decodeURIComponent(res.headers.get("x-name") || "shared");
@@ -1819,12 +1880,18 @@ async function openInbox() {
       await offerImport(shared, () => cache.delete(req));
       continue;
     }
+    // Pages to read wait in the inbox while another score is being read.
+    if (reading && (f.type.startsWith("image/") || (await isPdf(f)))) {
+      waiting = true;
+      continue;
+    }
     if (!(await cache.delete(req))) continue; // another window took it
     if (f.type.startsWith("image/") || (await isPdf(f))) scans.push(f);
     else others.push(f);
   }
   if (others.length) await openFiles(others);
-  if (scans.length) {
+  if (waiting) busyReading();
+  if (scans.length && !busyReading()) {
     loadScan();
     await addFiles(scans);
   }
@@ -1941,11 +2008,13 @@ function openScore(entry, nav = "push") {
   current = entry;
   score = buildScore(entry.pages.map(parsePage));
   migrateLayout(entry);
-  player?.stop();
+  player?.close();
   player = new Player(score);
   playTracked = false;
   player.onPosition = (beat) => {
-    $("position").textContent = `Bar ${barAt(beat).number}`;
+    // Called every frame: the text is written only when the bar changes.
+    const text = `Bar ${barAt(beat).number}`;
+    if ($("position").textContent !== text) $("position").textContent = text;
     follow(beat);
     followRead(beat);
   };
@@ -3031,7 +3100,7 @@ window.launchQueue?.setConsumer(async ({ files: handles }) => {
       await offerImport(shared);
     } else scans.push(f);
   }
-  if (scans.length) {
+  if (scans.length && !busyReading()) {
     loadScan();
     await addFiles(scans);
   }

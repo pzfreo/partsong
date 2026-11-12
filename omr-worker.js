@@ -58,14 +58,37 @@ async function compileWasm(path) {
 
 async function fetchPiece(url, start, end) {
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), STALL_MS);
+  // Stalled means no bytes for STALL_MS, not a piece that takes longer than
+  // that: the timer starts again with each chunk (a 4 MiB piece in 30 s needs
+  // over 1 Mbit/s; a slower, steady connection never got the reader).
+  let timer;
+  const alive = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => abort.abort(), STALL_MS);
+  };
+  alive();
   try {
     const res = await fetch(url, { headers: { Range: `bytes=${start}-${end}` }, cache: "no-store", signal: abort.signal });
-    if (res.status === 200) return { whole: await res.arrayBuffer() }; // server ignores ranges
-    if (res.status !== 206) throw new Error(`unexpected response ${res.status}`);
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength !== end - start + 1) throw new Error("short read");
-    return { piece: buf };
+    if (res.status !== 200 && res.status !== 206) throw new Error(`unexpected response ${res.status}`);
+    const chunks = [];
+    let size = 0;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      alive();
+      chunks.push(value);
+      size += value.byteLength;
+    }
+    const buf = new Uint8Array(size);
+    let at = 0;
+    for (const c of chunks) {
+      buf.set(c, at);
+      at += c.byteLength;
+    }
+    if (res.status === 200) return { whole: buf.buffer }; // server ignores ranges
+    if (size !== end - start + 1) throw new Error("short read");
+    return { piece: buf.buffer };
   } finally {
     clearTimeout(timer);
   }
@@ -496,7 +519,9 @@ async function pixels(bytes) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(bmp, 0, 0);
   bmp.close();
-  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  canvas.width = canvas.height = 0; // its memory back now, not when collected (see pdf-pages.js)
+  return data;
 }
 
 // Deflated (a page's class maps are mostly background: a few MB to tens of KB).
@@ -534,14 +559,16 @@ async function openPage(imageBytes, systemsJson, packed) {
   const sys = copyIn(Float64Array.from(ranges));
   const tiles = rs.page_open(rgba, img.width, img.height, sys, ranges.length / 2);
   rs.dealloc(rgba, img.data.byteLength);
+  rs.dealloc(sys, ranges.length * 8);
   lap("tiles");
 
   let classes = packed ? await squeeze(packed, "deflate", DecompressionStream) : null;
   if (classes?.length !== tiles * WIN * WIN) classes = await segment(rs, tiles);
   lap("segnet");
   const cp = copyIn(classes);
-  if (rs.page_segment(cp) !== 0) throw new Error(message());
-  rs.dealloc(cp, classes.byteLength);
+  const segmented = rs.page_segment(cp);
+  rs.dealloc(cp, classes.byteLength); // also when the page has no music (it throws below)
+  if (segmented !== 0) throw new Error(message());
   lap("segment");
   return { rs, mem, copyIn, message, classes, ms };
 }

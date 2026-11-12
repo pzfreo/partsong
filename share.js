@@ -28,7 +28,11 @@ async function asJpeg(blob) {
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
   canvas.getContext("2d").drawImage(bmp, 0, 0);
   bmp.close();
-  return { jpeg: await canvas.convertToBlob({ type: "image/jpeg", quality: PHOTO_QUALITY }), width: canvas.width, height: canvas.height };
+  const out = { jpeg: await canvas.convertToBlob({ type: "image/jpeg", quality: PHOTO_QUALITY }), width: canvas.width, height: canvas.height };
+  // A used canvas keeps its memory until collected, and iPhones run out of
+  // canvas memory first (see pdf-pages.js): give it back now.
+  canvas.width = canvas.height = 0;
+  return out;
 }
 
 // Older files' link (#import=..., gzipped JSON without photos).
@@ -285,8 +289,12 @@ export function parseScoreFile(text) {
     return null;
   }
   if (doc?.format !== FORMAT || !Array.isArray(doc.pages)) return null;
+  // Only the settings a share carries, whatever else the file says (a field
+  // such as pending would make it a scan to carry on reading at each launch).
+  const settings = Object.fromEntries(SETTINGS.filter((k) => doc.settings?.[k] !== undefined).map((k) => [k, doc.settings[k]]));
+  if (!Array.isArray(settings.excluded)) delete settings.excluded;
   return {
-    ...doc.settings,
+    ...settings,
     id: doc.id || crypto.randomUUID(),
     title: doc.title || "Shared score",
     created: doc.created || Date.now(),

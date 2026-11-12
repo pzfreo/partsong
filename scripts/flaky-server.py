@@ -2,11 +2,13 @@
 breaks every third /models/ response halfway through, to test resumable
 model downloads; with --flaky-wasm, breaks the first response for each of
 the reader's own .wasm files (omr/) halfway through.
-Usage: python3 scripts/flaky-server.py PORT [--flaky] [--flaky-wasm]"""
-import http.server, os, re, sys
+with --slow, sends each model's first piece steadily but slowly (about 35 s).
+Usage: python3 scripts/flaky-server.py PORT [--flaky] [--flaky-wasm] [--slow]"""
+import http.server, os, re, sys, time
 
 FLAKY = "--flaky" in sys.argv
 FLAKY_WASM = "--flaky-wasm" in sys.argv
+SLOW = "--slow" in sys.argv
 count = 0
 broken = set()
 
@@ -62,6 +64,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self.connection.shutdown(2)  # drop the connection mid-response
                     return
                 self.wfile.write(chunk)
+                if SLOW and m and start == 0:
+                    self.wfile.flush()
+                    time.sleep(0.55)  # 64 chunks of a 4 MiB piece: 35 s, never 30 s without bytes
                 sent += len(chunk)
                 remaining -= len(chunk)
 

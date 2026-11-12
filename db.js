@@ -106,6 +106,40 @@ export async function all() {
   return (await run("readonly", (store) => store.getAll())).map(fromStored);
 }
 
+// The library as a list: what a row shows, not the scores themselves. Walks
+// the store one score at a time, so the whole library's photos are never in
+// memory together (all() gives every score with every photo: hundreds of MB
+// for a library of photographed scores, more than an iPhone allows a page).
+// thumbs: also each score's first photo, for its row.
+export async function list(thumbs = false) {
+  return run("readonly", (store) => {
+    const out = [];
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const c = req.result;
+      if (!c) return;
+      const e = c.value;
+      const first = thumbs ? e.images?.[0] : null;
+      out.push({
+        id: e.id,
+        title: e.title,
+        created: e.created,
+        pending: e.pending,
+        stopped: e.stopped,
+        resumes: e.resumes,
+        locked: e.locked,
+        readSeconds: e.readSeconds,
+        nPages: e.pages?.length ?? 0,
+        nDone: e.pages?.filter(Boolean).length ?? 0,
+        nMarked: Object.keys(e.manual ?? {}).length,
+        thumb: first ? (first instanceof Blob || !first.bytes ? first : new Blob([first.bytes], { type: first.type })) : null,
+      });
+      c.continue();
+    };
+    return { result: out };
+  });
+}
+
 // One score, without loading the rest of the library (each score's photos
 // come out of storage as bytes: a whole library can be hundreds of MB).
 export async function get(id) {
