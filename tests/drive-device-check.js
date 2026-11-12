@@ -1,7 +1,10 @@
 // Opening the scan screen runs a quick check that the reader can start (SIMD,
 // and the memory onnxruntime reserves); a failure shows what to do, counted by
 // device. The real check here, then a stand-in worker that reports a memory
-// refusal and one an old browser. GoatCounter is kept out so the stand-in counts:
+// refusal and one an old browser. GoatCounter is kept out so the stand-in counts.
+// Run with a Windows user agent (the harness emulates touch, so a Mac looks
+// like an iPad, which gets the iPad note and wording):
+//   USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36" \
 //   CHROME_FLAGS="--host-resolver-rules=MAP gc.zgo.at ~NOTFOUND" node scripts/headless-test.mjs \
 //     http://localhost:8765/index.html out.json 60 tests/drive-device-check.js
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

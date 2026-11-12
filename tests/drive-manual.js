@@ -82,7 +82,7 @@ $("clear-marks").click(); await sleep(100);
 r.oneTapKeepsMarks = $("marked-count").textContent;
 $("clear-marks").click(); await sleep(200);
 r.clearedShowsList = shown($("auto-part"));
-[...document.querySelectorAll("#lines li")].find((li) => li.querySelector(".pick span").textContent === "Alto").querySelector('input[type="radio"]').click();
+[...document.querySelectorAll("#lines li")].find((li) => li.querySelector(".pick span").textContent === "Part 2 lower").querySelector('input[type="radio"]').click();
 $("settings").click(); await sleep(300);
 resetPlayed();
 $("from-bar").value = 1; $("from-bar").onchange();

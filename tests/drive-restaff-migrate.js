@@ -1,14 +1,14 @@
-// A pair of staves the reader wrote as one goes back on two (layout 3), which
-// can reorder a score's parts. A score saved under layout 2 keeps its part
-// choices: your part, the parts switched off, and a mark move to the lines
-// with the same music. Uses testdata/corpus/rose.partsong.pdf, where the
-// re-staffed part (page 1's last piano system) gains two lines, so the second
-// piano part moves from lines 16-19 to 18-21.
+// A score saved under an earlier layout keeps its part choices when the parts
+// change: your part, the parts switched off, and a mark move to the lines with
+// the same music. Layout 3 put a pair of staves the reader wrote as one back
+// on two; layout 4 numbers the parts from the top (score.js numberParts).
+// Uses testdata/corpus/rose.partsong.pdf saved as under layout 2, where it had
+// 20 lines matched by what the reader called them; now it has 10, by staff.
 //   node scripts/headless-test.mjs http://localhost:8765/index.html out.json 120 tests/drive-restaff-migrate.js
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(300); } throw new Error("timeout waiting for " + label); };
 const $ = (id) => document.getElementById(id);
-const db = (mode, fn) => new Promise((res, rej) => { const q = indexedDB.open("partscanner", 1); q.onsuccess = () => { const tx = q.result.transaction("scores", mode); const out = fn(tx.objectStore("scores")); tx.oncomplete = () => res(out.result ?? out); tx.onerror = rej; }; });
+const db = (mode, fn) => new Promise((res, rej) => { const q = indexedDB.open("partscanner", 1); q.onupgradeneeded = () => q.result.createObjectStore("scores", { keyPath: "id" }); q.onsuccess = () => { const tx = q.result.transaction("scores", mode); const out = fn(tx.objectStore("scores")); tx.oncomplete = () => res(out.result ?? out); tx.onerror = rej; }; });
 const { buildScore, parsePage } = await import("/score.js");
 await sleep(500);
 const dt = new DataTransfer();
@@ -20,7 +20,7 @@ for (let i = 0; i < 40 && !entry; i++) {
   [...document.querySelectorAll("button")].find((b) => b.textContent === "Add" && b.offsetParent)?.click();
   entry = (await db("readonly", (s) => s.getAll())).find((e) => e.pages?.length);
 }
-const old = buildScore(entry.pages.map((x) => parsePage(x, { restaff: false })));
+const old = buildScore(entry.pages.map((x) => parsePage(x, { restaff: false })), { numbers: false }); // as layout 2 had the parts
 const now = buildScore(entry.pages.map(parsePage));
 const sop = old.lines.findIndex((l) => l.staffKey === "2#1/1" && l.voice === "upper");
 const sys = old.systems.findIndex((s) => s.staves.some((st) => st.lines.includes(sop)));
@@ -34,15 +34,23 @@ await waitFor(() => !$("practice").hidden, 20000, "score");
 await sleep(500);
 const saved = await db("readonly", (s) => s.get(entry.id));
 const label = (l) => l && `${l.label} ${l.staffKey} ${l.voice}`;
+// The share of an old line's notes that a line has now.
+const kept = (from, to) => { const set = new Set((to?.notes ?? []).map((n) => `${n.t}:${n.midi}`)); return from.notes.filter((n) => set.has(`${n.t}:${n.midi}`)).length / from.notes.length; };
 const r = {
-  oldSoprano: sop,
-  newSoprano: now.lines.findIndex((l) => l.staffKey === "2#1/1" && l.voice === "upper"),
+  linesBefore: old.lines.length,
+  linesNow: now.lines.length,
+  was: label(old.lines[sop]),
   layout: saved.layout,
   mine: label(now.lines[saved.mine]),
+  mineKeepsNotes: kept(old.lines[sop], now.lines[saved.mine]),
   mark: label(now.lines[saved.manual[sys]]),
   markedStaff: saved.markedStaff[sys],
-  offBefore: off.map((id) => label(old.lines[id])).sort().join(","),
+  markedStaffHasLine: !!now.systems[sys].staves.find((st) => st.key === saved.markedStaff[sys])?.lines.includes(saved.mine),
+  offBefore: off.length,
   offAfter: saved.excluded.map((id) => label(now.lines[id])).sort().join(","),
 };
-r.ok = r.oldSoprano !== r.newSoprano && r.layout === 4 && r.mine === label(old.lines[sop]) && r.mark === r.mine && r.offBefore.split(",").length === 8 && r.markedStaff === now.lines[r.newSoprano].staffKey && r.offBefore === r.offAfter;
+// The old line 2#1/1 upper was called a piano but is the top staff's music in
+// its systems, so it's Part 1 upper now; the real piano's four lines stay off.
+r.ok = r.linesBefore === 20 && r.linesNow === 10 && r.layout === 4 && r.mineKeepsNotes === 1 && r.mine === "Part 1 upper 1#0/1 upper" && r.mark === r.mine && r.markedStaffHasLine && r.offBefore === 8
+  && r.offAfter === "Part 1 upper 1#0/1 upper,Part 5 lower 1#4/1 lower,Part 5 upper 1#4/1 upper,Part 6 lower 1#5/1 lower,Part 6 upper 1#5/1 upper";
 window.result = r;
