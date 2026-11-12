@@ -186,9 +186,7 @@ async function modelBytes(name, again, into = (n) => new Uint8Array(n)) {
 // about 900 MB of short-lived buffers a page that Safari frees late (Mac
 // Safari, 3 pages: 4.3 GB at the peak, against 1.5 GB with segnet on the CPU),
 // more than iOS lets a tab have.
-// The app says so in init (an iPad's Safari calls itself a Mac, and a worker
-// can't tell them apart by touch); the user agent until then.
-let IOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 
 async function newSession(id) {
   const name = sessionNames[id];
@@ -700,7 +698,6 @@ let ready;
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
-      if (typeof data.ios === "boolean") IOS = data.ios;
       if (Number.isInteger(data.threads) && data.threads > 0) encoderThreads = data.threads;
       if (typeof data.gpu === "boolean") encoderGpu = data.gpu;
       ready ??= init(!!data.noGpu, !!data.exact);
