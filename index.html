@@ -186,6 +186,14 @@
       <button id="recognise" class="primary wide" disabled>Read music</button>
       <p id="read-step" class="check-step" hidden><strong>Step 3 of 3: reading the notes</strong></p>
       <div id="status" class="status" aria-live="polite"></div>
+      <!-- After "doesn't look like sheet music", for singers who have read a score before. -->
+      <div id="no-music-send" class="install-card" hidden>
+        <p><strong>Is this sheet music?</strong> If it is, the mistake is probably ours. Would you send us the page so we can see why it wasn't read? We'll use it only for that.</p>
+        <div class="actions">
+          <button id="no-music-yes" class="primary report-open">Send it to us</button>
+          <button id="no-music-no">No thanks</button>
+        </div>
+      </div>
       <div id="systems-check" class="systems-check" hidden>
         <p class="check-step"><strong>Step 2 of 3: check where each line of music (system) ends</strong></p>
         <p id="check-intro"></p>

@@ -185,11 +185,17 @@ function diagnostics() {
   return lines.join("\n");
 }
 
-function openReport() {
+// After "doesn't look like sheet music", asked (Send it to us): the report carries the
+// pages (up to 3), so we can see whether the reader missed real music.
+const reportPages = () => (!$("scan").hidden && !$("no-music-send").hidden ? pages.filter((p) => !p.xml).slice(0, 3) : []);
+function openReport(e) {
   $("report-diag").textContent = diagnostics();
-  const withScore = !$("practice").hidden && !!current;
+  const withPages = reportPages().length > 0;
+  if (withPages && e?.currentTarget?.closest?.("#no-music-send") && !$("report-text").value.trim())
+    $("report-text").value = "Partsong said this isn't sheet music, but it is.";
+  const withScore = (!$("practice").hidden && !!current) || withPages;
   const phone = isMobile() && !!navigator.canShare;
-  const button = withScore ? "Share report with score" : "Share report";
+  const button = withPages ? "Share report with the page" + (reportPages().length > 1 ? "s" : "") : withScore ? "Share report with score" : "Share report";
   $("report-share").textContent = button;
   $("report-status").textContent = "";
   const steps = phone
@@ -202,8 +208,8 @@ function openReport() {
       ]
     : [
         "Describe what happened above.",
-        `Click <b>${button}</b>: an email to <b>${REPORT_TO}</b> opens${withScore ? " and the score file downloads" : ""}.`,
-        ...(withScore ? ["Attach the downloaded file to the email."] : []),
+        `Click <b>${button}</b>: an email to <b>${REPORT_TO}</b> opens${withScore ? ` and the ${withPages ? "page" : "score"} file${reportPages().length > 1 ? "s download" : " downloads"}` : ""}.`,
+        ...(withScore ? [`Attach the downloaded file${reportPages().length > 1 ? "s" : ""} to the email.`] : []),
         "Send.",
       ];
   $("report-steps").innerHTML = steps.map((s) => `<li>${s}</li>`).join("");
@@ -212,6 +218,11 @@ function openReport() {
   $("report-text").focus();
 }
 for (const b of document.querySelectorAll(".report-open")) b.onclick = openReport;
+$("no-music-yes").addEventListener("click", () => track("no-music-ask: send"));
+$("no-music-no").onclick = () => {
+  $("no-music-send").hidden = true;
+  track("no-music-ask: no thanks");
+};
 
 function closeReport(nav = true) {
   $("report").hidden = true;
@@ -277,10 +288,13 @@ $("report-share").onclick = async () => {
   const what = $("report-text").value.trim().split("\n")[0].slice(0, 60);
   const title = `Partsong problem${what ? `: ${what}` : ""}`;
   const withScore = !$("practice").hidden && !!current;
+  const pageFiles = reportPages().map((p, i) => new File([p.blob], `page-${pages.indexOf(p) + 1}.${p.blob.type === "image/png" ? "png" : "jpg"}`, { type: p.blob.type || "image/jpeg" }));
   button.disabled = true;
   try {
     let file = null;
-    if (withScore) {
+    if (pageFiles.length) {
+      track("report-with-pages");
+    } else if (withScore) {
       if (reportPrepared?.id !== current.id) {
         status.textContent = "Preparing the score…";
         reportPrepared = { id: current.id, file: await scoreFile(liveEntry(current)) };
@@ -288,7 +302,8 @@ $("report-share").onclick = async () => {
       file = reportPrepared.file;
     }
     const text = `To: ${REPORT_TO}\n\n${reportText()}`;
-    const share = file ? { files: [file], title, text } : { title, text };
+    const files = pageFiles.length ? pageFiles : file ? [file] : [];
+    const share = files.length ? { files, title, text } : { title, text };
     if (isMobile() && navigator.canShare?.(share)) {
       try {
         await navigator.share(share);
@@ -299,15 +314,15 @@ $("report-share").onclick = async () => {
           e.name === "NotAllowedError" ? `Ready. Tap ${button.textContent} again.` : e.name === "AbortError" ? "" : `Couldn't share: ${e.message}`;
       }
     } else {
-      if (file) await shareFile(file, title); // downloads on desktop
+      for (const f of files) await shareFile(f, title); // downloads on desktop
       reportPrepared = null;
       let body = reportText();
       if (body.length > 6000) body = body.slice(0, 6000) + "\n…(trimmed)";
       const url = `mailto:${REPORT_TO}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
       // A link click, like the download above (tests stub it so no mail app opens).
       Object.assign(document.createElement("a"), { href: url }).click();
-      status.textContent = file
-        ? `Attach ${file.name} (in your Downloads) to the email, then send.`
+      status.textContent = files.length
+        ? `Attach ${files.map((f) => f.name).join(" and ")} (in your Downloads) to the email, then send.`
         : `If no email opened, write to ${REPORT_TO} and paste the details below.`;
     }
   } catch (e) {
@@ -841,6 +856,26 @@ function countRead() {
   } catch {}
 }
 
+// A scan with no music found ("doesn't look like sheet music"): is it really
+// not music, or music the reader missed? Counted with where the page came
+// from, its size, how many systems were found (none: no staves at all), and
+// how many scores this device has read before (0: it never has), e.g.
+// "read-no-music (iPhone v292): camera, 12 MP, 0 systems, reads before 0".
+// Never the picture: Send it to us lets the singer send it by email.
+async function countNoMusic(p, message) {
+  try {
+    let mp = "?";
+    try {
+      const bmp = await createImageBitmap(p.blob);
+      mp = Math.max(1, Math.round((bmp.width * bmp.height) / 1e6));
+      bmp.close();
+    } catch {}
+    const systems = /No staffs/.test(message) ? 0 : (p.layout?.length ?? "?");
+    const before = group(+(localStorage.getItem(READS) || 0), [1, 2, 3, 6]);
+    track(`read-no-music (${deviceTag}): ${p.from ?? "saved"}, ${mp} MP, ${systems} systems, reads before ${before}`);
+  } catch {}
+}
+
 // Why a reading failed, short enough to count: the error's last line,
 // without file paths, and with
 // numbers as N so the same failure counts together. Never the score or photo.
@@ -998,13 +1033,14 @@ function keepAwake() {
   };
 }
 
-async function addPage(image) {
+async function addPage(image, from = "photo") {
   // Our own copy: iOS can stop letting Safari read a picked photo later (e.g.
   // after the app was in the background), and an upright photo is kept as is.
   const copy = new Blob([await image.arrayBuffer()], { type: image.type });
   const blob = await uprightPhoto(copy);
-  const p = { blob, url: URL.createObjectURL(blob) };
+  const p = { blob, url: URL.createObjectURL(blob), from };
   pages.push(p);
+  $("no-music-send").hidden = true; // the pages have changed
   // One tile more, not the grid again: for a long PDF that built every page's
   // picture again for each page added.
   $("pages").append(pageTile(p, pages.length - 1));
@@ -1021,7 +1057,8 @@ async function unreadableReason(file) {
   return "it isn't an image or PDF this browser can open";
 }
 
-async function addFiles(files) {
+// from: "camera" (Take photo) or "photo" (picked); a PDF's pages are "PDF".
+async function addFiles(files, from = "photo") {
   const problems = [];
   for (const f of files) {
     const name = f.name || "file";
@@ -1030,7 +1067,7 @@ async function addFiles(files) {
       try {
         await pdfPages(f, async (blob, n, count) => {
           setPageStatus(`Opening ${name}: page ${n} of ${count}`);
-          await addPage(blob);
+          await addPage(blob, "PDF");
         });
       } catch (e) {
         problems.push(`Couldn't open ${name}: ${e.message}`);
@@ -1038,7 +1075,7 @@ async function addFiles(files) {
       continue;
     }
     try {
-      await addPage(f);
+      await addPage(f, from);
     } catch {
       problems.push(`Couldn't add ${name}: ${await unreadableReason(f)}.`);
     }
@@ -1048,7 +1085,7 @@ async function addFiles(files) {
 }
 
 $("camera").onchange = (e) => {
-  addFiles([...e.target.files]);
+  addFiles([...e.target.files], "camera");
   e.target.value = "";
 };
 $("gallery").onchange = (e) => {
@@ -1108,6 +1145,7 @@ function pageTile(p, i) {
   return li;
 }
 function renderPages() {
+  $("no-music-send").hidden = true; // the pages have changed
   $("pages").replaceChildren(...pages.map(pageTile));
   $("recognise").disabled = pages.length === 0;
 }
@@ -1325,6 +1363,7 @@ class Stopped extends Error {}
 async function readScan() {
   if (reading) return;
   reading = true;
+  $("no-music-send").hidden = true;
   $("scan").classList.add("reading");
   $("recognise").textContent = "Stop reading";
   $("read-hint").hidden = false;
@@ -1418,6 +1457,13 @@ async function readScan() {
     const lines = e.message.trim().split("\n");
     const why = lines.length > 1 ? `${lines.at(-1)}\n\n${e.message}` : e.message;
     const page = pages.findIndex((p) => !p.xml) + 1;
+    if (NO_MUSIC.test(e.message)) {
+      countNoMusic(pages[page - 1], e.message);
+      // Asked only of singers who have read a score before (so they know what
+      // a good photo is): their misses are the ones most likely the reader's.
+      $("no-music-send").hidden = !(+(localStorage.getItem(READS) || 0) > 0);
+      if (!$("no-music-send").hidden) track("no-music-ask: shown");
+    }
     setPageStatus(
       NO_MUSIC.test(e.message)
         ? `Page ${page} doesn't look like sheet music.\nRetake the photo straight on, in good light, or remove it (×) and press Read music again.`
