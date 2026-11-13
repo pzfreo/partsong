@@ -65,7 +65,7 @@
   <div id="about" class="report-overlay" role="dialog" aria-labelledby="about-heading" hidden>
     <div class="report-card about-card">
       <h2 id="about-heading">Partsong <small id="about-version"></small></h2>
-      <p>Scan choral sheet music on your phone and practise your own part, with the other parts quieter. <a href="help.html#video" target="_blank" rel="noopener">Watch the 1½-minute video</a> of how it works.</p>
+      <p>Scan choral sheet music on your phone and practise your own part, with the other parts quieter. <button class="link video-open">Watch the 1½-minute video</button> of how it works.</p>
       <p>Everything runs on your device: the music is read on the phone, and your scores stay on it unless you share them. No account needed.</p>
       <p>When you share a score, an encrypted copy is uploaded so the link can bring it to the people you send it to. The key is only in the link, so nobody else, Partsong included, can open it. Links work for a month, and copies are deleted soon after; for a copy that doesn't expire, use Save as a PDF file in a score's settings.</p>
       <p>To see which features get used, Partsong counts visits and actions (such as reading a score or pressing play), and in broad groups how many days it's been used, anonymously with <a href="https://www.goatcounter.com" target="_blank" rel="noopener">GoatCounter</a>: no cookies, nothing that identifies you, and never your scores or their names.</p>
@@ -105,6 +105,14 @@
     </div>
   </div>
 
+  <!-- The getting-started video, played here rather than on the Help page. -->
+  <div id="intro-video" class="report-overlay video-overlay" role="dialog" aria-label="How Partsong works" hidden>
+    <div class="video-card">
+      <video id="intro-video-player" controls playsinline preload="none" poster="video/partsong-getting-started.jpg" src="video/partsong-getting-started.mp4"></video>
+      <div class="actions"><button id="intro-video-close" class="primary">Close</button></div>
+    </div>
+  </div>
+
   <div id="report" class="report-overlay" role="dialog" aria-labelledby="report-heading" hidden>
     <div class="report-card">
       <div class="card-head">
@@ -137,7 +145,7 @@
         <p class="muted">New here?</p>
         <div class="actions">
           <button class="try-sample">Try a sample</button>
-          <a class="button" href="help.html#video" target="_blank" rel="noopener">Watch a video</a>
+          <button class="video-open">Watch a video</button>
         </div>
       </div>
       <p class="muted beta-note">Partsong is in beta and won't read every score perfectly yet. If something goes wrong, please <button class="link report-open">report a problem</button>.</p>

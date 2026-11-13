@@ -324,6 +324,9 @@ input[type="radio"], input[type="checkbox"] { width: 20px; height: 20px; accent-
 .page-zoom-bar span { flex: 1; color: var(--muted); }
 /* Privacy notice and terms (privacy.html, terms.html). */
 .legal { line-height: 1.55; }
+.video-overlay { align-items: center; padding: 12px; background: rgb(0 0 0 / 0.6); }
+.video-card { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.video-card video { display: block; height: min(915px, calc(100dvh - 90px)); max-width: calc(100vw - 24px); aspect-ratio: 412 / 915; border-radius: 16px; background: #2b2870; }
 .how-video { display: block; width: 100%; max-width: 340px; aspect-ratio: 412 / 915; margin: 10px auto 0; border-radius: 16px; background: #2b2870; }
 .legal h2 { font-size: 1.5rem; margin-top: 8px; }
 .legal h3 { font-size: 1.08rem; margin: 26px 0 6px; }

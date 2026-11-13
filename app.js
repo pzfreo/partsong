@@ -138,6 +138,7 @@ window.addEventListener("popstate", (e) => {
   const st = e.state ?? {};
   if (!st.report) closeReport(false);
   if (!st.about) closeAbout(false);
+  if (!st.video && !$("intro-video").hidden) closeVideo(false);
   if (!st.zoom) closeZoom(false);
   if (st.screen && !$(st.screen).hidden) {
     if (st.screen === "practice") {
@@ -236,6 +237,28 @@ function closeAbout(nav = true) {
   if (nav && history.state?.about) history.back();
 }
 $("about-close").onclick = () => closeAbout();
+
+// The getting-started video, played over the start screen (it was only on the
+// Help page, and few went there: 12 Help visits to 330 home visits, 10–13 Nov).
+function openVideo() {
+  // From About: the video takes About's place in the history, so Back closes it.
+  const fromAbout = !$("about").hidden;
+  if (fromAbout) closeAbout(false);
+  $("intro-video").hidden = false;
+  history[fromAbout && history.state?.about ? "replaceState" : "pushState"]({ ...history.state, about: false, video: true }, "");
+  $("intro-video-player").play().catch(() => {});
+}
+for (const b of document.querySelectorAll(".video-open")) b.onclick = openVideo;
+function closeVideo(nav = true) {
+  $("intro-video-player").pause();
+  $("intro-video").hidden = true;
+  if (nav && history.state?.video) history.back();
+}
+$("intro-video-close").onclick = () => closeVideo();
+$("intro-video").onclick = (e) => {
+  if (e.target === $("intro-video")) closeVideo();
+};
+$("intro-video-player").addEventListener("play", () => track("video-play (start screen)", "Getting started video"), { once: true });
 
 function reportText() {
   return `${$("report-text").value.trim() || "(no description)"}\n\n---\n${$("report-diag").textContent}`;
