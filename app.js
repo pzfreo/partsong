@@ -859,20 +859,18 @@ function countRead() {
 // A scan with no music found ("doesn't look like sheet music"): is it really
 // not music, or music the reader missed? Counted with where the page came
 // from, its size, how many systems were found (none: no staves at all), and
-// how many scores this device has read before (0: it never has), e.g.
+// how many scores this device has read before (0: it never has); systems are
+// those found when the systems were checked (0: none, though the reader may
+// still find staves), e.g.
 // "read-no-music (iPhone v292): camera, 12 MP, 0 systems, reads before 0".
 // Never the picture: Send it to us lets the singer send it by email.
-async function countNoMusic(p, message) {
+function countNoMusic(p, message) {
   try {
-    let mp = "?";
-    try {
-      const bmp = await createImageBitmap(p.blob);
-      mp = Math.max(1, Math.round((bmp.width * bmp.height) / 1e6));
-      bmp.close();
-    } catch {}
-    const systems = /No staffs/.test(message) ? 0 : (p.layout?.length ?? "?");
+    // Sent at once: v293 decoded the photo again first to get its size, and
+    // the count never arrived from a phone.
+    const systems = /No staffs/.test(message) ? 0 : (p?.layout?.length ?? 0);
     const before = group(+(localStorage.getItem(READS) || 0), [1, 2, 3, 6]);
-    track(`read-no-music (${deviceTag}): ${p.from ?? "saved"}, ${mp} MP, ${systems} systems, reads before ${before}`);
+    track(`read-no-music (${deviceTag}): ${p?.from ?? "saved"}, ${p?.mp ?? "?"} MP, ${systems} systems, reads before ${before}`);
   } catch {}
 }
 
@@ -1152,12 +1150,15 @@ function renderPages() {
 
 // Apply EXIF rotation and cap the size. homr autocrops before resizing to
 // 1920 px wide, so keep typical phone resolution (~4000 px) intact.
-async function normalise(blob) {
+// page: noted on it is the size the reader gets, in megapixels (counted when a
+// page has no music).
+async function normalise(blob, page) {
   const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" });
   const scale = Math.min(1, 4200 / Math.max(bmp.width, bmp.height));
   const canvas = new OffscreenCanvas(Math.round(bmp.width * scale), Math.round(bmp.height * scale));
   canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
+  if (page) page.mp = Math.max(1, Math.round((canvas.width * canvas.height) / 1e6));
   const png = await canvas.convertToBlob({ type: "image/png" });
   canvas.width = canvas.height = 0; // its memory back now, not when collected (see pdf-pages.js)
   return png.arrayBuffer();
@@ -1166,9 +1167,9 @@ async function normalise(blob) {
 // A saved page whose picture the phone has lost can't be read again: say
 // what to do rather than show the browser's error.
 const LOST_PICTURE = "the phone has lost the picture of this page. Tap Discard this scan, then add the pages or PDF again";
-async function pagePixels(blob) {
+async function pagePixels(blob, page) {
   try {
-    return await normalise(blob);
+    return await normalise(blob, page);
   } catch {
     throw new Error(LOST_PICTURE);
   }
@@ -1232,7 +1233,7 @@ async function checkSystems(stopped) {
       // reloading under memory pressure) isn't done again.
       if (!pages[i].layout) {
         try {
-          const r = await Promise.race([layoutPage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i]), stopped]);
+          const r = await Promise.race([layoutPage(await pagePixels(pages[i].blob, pages[i]), scanSettings.systemHints?.[i]), stopped]);
           pages[i].layout = r.systems;
           pages[i].parts = r.parts;
           pages[i].classes = r.classes;
@@ -1399,7 +1400,7 @@ async function readScan() {
       try {
         const classes = pages[i].classes;
         pages[i].classes = null;
-        pages[i].xml = await Promise.race([recognisePage(await pagePixels(pages[i].blob), scanSettings.systemHints?.[i], classes), stopped]);
+        pages[i].xml = await Promise.race([recognisePage(await pagePixels(pages[i].blob, pages[i]), scanSettings.systemHints?.[i], classes), stopped]);
       } catch (e) {
         // A cover or words-only page: leave it out and read the rest (unless
         // it's the only page left, when the error is the answer).
