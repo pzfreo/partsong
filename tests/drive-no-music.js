@@ -35,10 +35,14 @@ const read = async () => {
 // Never read a score: counted, but not asked.
 await read();
 r.newcomerAsked = !$("no-music-send").hidden;
-// Has read two: asked.
+// Has read two: asked. On a phone the card is below the bottom of the screen
+// (browser bars, bigger text): pushed down here the same way, from the top.
 localStorage.setItem("partsong-reads", "2");
+$("status").before(Object.assign(document.createElement("div"), { style: "height: 700px" }));
+scrollTo(0, 0);
 r.status = await read();
 r.sendShown = !$("no-music-send").hidden;
+{ const b = $("no-music-send").getBoundingClientRect(); r.inView = b.top >= 0 && b.bottom <= innerHeight + 1; }
 r.counted = events.filter((p) => p.startsWith("read-no-music"));
 
 // Send it to us: the report, with the page.
@@ -66,7 +70,7 @@ r.askedAgain = !$("no-music-send").hidden;
 $("no-music-no").click();
 r.noThanks = { hidden: $("no-music-send").hidden, counted: events.includes("no-music-ask: no thanks") };
 
-r.ok = r.hiddenBefore && !r.newcomerAsked && r.sendShown &&
+r.ok = r.hiddenBefore && !r.newcomerAsked && r.sendShown && r.inView &&
   JSON.stringify(r.counted.slice(0, 2)) === JSON.stringify(["read-no-music (iPad dev): camera, 3 MP, 0 systems, reads before 0", "read-no-music (iPad dev): camera, 3 MP, 0 systems, reads before 2"]) &&
   r.report.open && r.report.button === "Share report with the page" && /isn't sheet music, but it is/.test(r.report.text) &&
   JSON.stringify(r.sent.files) === JSON.stringify(["page-1.jpg image/jpeg true"]) && r.sent.mentionsAddress &&

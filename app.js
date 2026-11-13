@@ -1462,7 +1462,11 @@ async function readScan() {
       // Asked only of singers who have read a score before (so they know what
       // a good photo is): their misses are the ones most likely the reader's.
       $("no-music-send").hidden = !(+(localStorage.getItem(READS) || 0) > 0);
-      if (!$("no-music-send").hidden) track("no-music-ask: shown");
+      if (!$("no-music-send").hidden) {
+        track("no-music-ask: shown");
+        // Below the message, often off the bottom of a phone screen: brought up.
+        requestAnimationFrame(() => $("no-music-send").scrollIntoView({ behavior: "smooth", block: "center" }));
+      }
     }
     setPageStatus(
       NO_MUSIC.test(e.message)
