@@ -198,8 +198,23 @@ function openReport(e) {
   const text = $("report-text").value.trim();
   if (fromAsk && !text) $("report-text").value = NO_MUSIC_REPORT;
   else if (!fromAsk && text === NO_MUSIC_REPORT) $("report-text").value = "";
+  // What can go with it: the unread pages, or the open score. Ticked to start
+  // with; unticked, the report goes without it.
   const what = n ? (n > 1 ? "pages" : "page") : !$("practice").hidden && current ? "score" : "";
-  const button = n ? `Send report with the ${what}` : what ? "Send report with score" : "Send report";
+  $("report-include-row").hidden = !what;
+  $("report-include").checked = true;
+  $("report-include-label").textContent = `Include the ${what}`;
+  reportLabels();
+  $("report").hidden = false;
+  history.pushState({ ...history.state, report: true }, "");
+  $("report-text").focus();
+}
+// What goes with the report (the pages or score, if ticked).
+const reportIncludes = () => !$("report-include-row").hidden && $("report-include").checked;
+function reportLabels() {
+  const n = reportPages().length;
+  const what = !reportIncludes() ? "" : n ? (n > 1 ? "pages" : "page") : "score";
+  const button = !what ? "Send report" : n ? `Send report with the ${what}` : "Send report with score";
   $("report-share").textContent = $("report-share").dataset.label = button;
   $("report-status").textContent = "";
   $("report-other").hidden = true;
@@ -210,10 +225,8 @@ function openReport(e) {
     "Send the email.",
   ];
   $("report-steps").innerHTML = steps.map((s) => `<li>${s}</li>`).join("");
-  $("report").hidden = false;
-  history.pushState({ ...history.state, report: true }, "");
-  $("report-text").focus();
 }
+$("report-include").onchange = reportLabels;
 for (const b of document.querySelectorAll(".report-open")) b.onclick = openReport;
 $("no-music-yes").addEventListener("click", () => track("no-music-ask: send"));
 $("no-music-no").onclick = () => {
@@ -299,8 +312,8 @@ $("report-share").onclick = async () => {
   const status = $("report-status");
   const what = $("report-text").value.trim().split("\n")[0].slice(0, 60);
   const title = `Partsong problem${what ? `: ${what}` : ""}`;
-  const pageCount = reportPages().length;
-  const entry = reportEntry();
+  const pageCount = reportIncludes() ? reportPages().length : 0;
+  const entry = reportIncludes() ? reportEntry() : null;
   button.disabled = true;
   try {
     let link = null;

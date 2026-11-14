@@ -318,6 +318,7 @@ input[type="radio"], input[type="checkbox"] { width: 20px; height: 20px; accent-
 .report-card h2 { margin: 0 0 12px; }
 .report-card label { display: block; margin-bottom: 6px; }
 .report-card textarea { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); resize: vertical; }
+.report-card .report-include { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; }
 .report-card details { margin: 12px 0; }
 .report-card pre { max-height: 30vh; overflow: auto; padding: 8px; border-radius: 8px; background: var(--surface); font-size: 0.75rem; white-space: pre-wrap; word-break: break-word; }
 /* A scan page full-screen (tap its thumbnail), to check it before reading. */

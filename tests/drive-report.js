@@ -1,6 +1,7 @@
 // Report a problem: the score goes up to the share relay (encrypted, as a link)
 // and an email to bugs@partsong.app opens with the description, the link and
-// the technical details; nothing to attach or address. From home, no upload.
+// the technical details; nothing to attach or address. Unticking Include the
+// score sends the report without it. From home, no upload.
 // After a slow upload the email opens on the next tap (Open the email). No
 // email app: Share it another way. If the upload fails, the score file is
 // shared as before. Technical details expand; Back, ✕ and tapping outside close it.
@@ -80,6 +81,22 @@ r.slow.resetOnEdit = $("report-share").textContent === "Send report with score";
 setActive(true);
 $("report-close").click(); await sleep(300);
 
+// Without the score: untick it, and the email goes without a link.
+mailto = null;
+await openFromSettings();
+r.untick = { shown: !$("report-include-row").hidden, label: $("report-include-row").textContent.trim(), ticked: $("report-include").checked };
+$("report-include").click();
+r.untick.button = $("report-share").textContent;
+r.untick.step = steps()[1];
+await shot(false);
+$("report-share").click();
+await waitFor(() => mailto, 10000, "mailto without score");
+r.untick.link = mail().link;
+$("report-close").click(); await sleep(300);
+await openFromSettings();
+r.untick.tickedAgainNextTime = $("report-include").checked && $("report-share").textContent === "Send report with score";
+$("report-close").click(); await sleep(300);
+
 // The upload fails: the score file goes by the share sheet, as before.
 localStorage.setItem("partsong.relay", "http://localhost:9");
 shared = null; mailto = null;
@@ -108,7 +125,7 @@ r.wentHome = !$("home").hidden;
 setPhone(true);
 mailto = null;
 document.querySelector("#home .report-open").click(); await sleep(200);
-r.home = { button: $("report-share").textContent, steps: steps() };
+r.home = { button: $("report-share").textContent, steps: steps(), includeShown: !$("report-include-row").hidden };
 $("report-share").click();
 await waitFor(() => mailto, 10000, "home mailto");
 r.home.link = mail().link;
@@ -122,7 +139,9 @@ r.ok = r.buttons.join() === "report-close,report-share" && r.detailsOpen && r.ph
   r.phone.uploaded.title === "Huron" && r.phone.uploaded.pages === 1 && r.phone.uploaded.photos === 1 && r.phone.uploaded.mine === 2 &&
   r.phone.otherShown && r.phone.other.files === 0 && r.phone.other.to && r.phone.other.link && r.closeX &&
   r.slow.mailtoBeforeTap === null && r.slow.opened && r.slow.resetOnEdit &&
+  r.untick.shown && r.untick.label === "Include the score" && r.untick.ticked && r.untick.button === "Send report" &&
+  r.untick.step === "Tap Send report: an email to bugs@partsong.app opens." && r.untick.link === null && r.untick.tickedAgainNextTime &&
   r.failed.file === "Huron.partsong.pdf" && r.failed.to && r.failed.mailto === null &&
   r.desktop.result.link && r.desktop.result.downloaded === null && r.tapOutsideCloses &&
-  r.wentHome && r.home.button === "Send report" && r.home.link === null && r.backCloses;
+  r.wentHome && r.home.button === "Send report" && !r.home.includeShown && r.home.link === null && r.backCloses;
 window.result = r;
