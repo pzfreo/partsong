@@ -1213,6 +1213,8 @@ $("recognise").onclick = () => (reading ? stopReading?.() : readScan());
 // The reader's errors for a page with no music (homr-rs: "No staffs found",
 // "No noteheads or clefs found"; earlier "No noteheads found").
 const NO_MUSIC = /No (staffs|noteheads|noteheads or clefs) found\s*$/;
+// The reader (WebAssembly) running out of memory, as each browser says it.
+const OUT_OF_MEMORY = /out of memory|unreachable/i;
 
 // ---------- two phases: the systems on every page, then the staves ----------
 // Finding each page's systems is quick; reading every staff is the slow part.
@@ -1455,6 +1457,19 @@ async function readScan() {
       );
       return;
     }
+    // The reader ran out of memory without the phone closing the page
+    // (WebAssembly: "unreachable" in Chrome, "Unreachable code should not be
+    // executed" in Safari, "Out of memory"): carry on from here in low memory,
+    // as after a closed page. Already in low memory: say so plainly.
+    const outOfMemory = OUT_OF_MEMORY.test(e.message);
+    if (outOfMemory && !lowMemory) {
+      track(`read-out-of-memory (${deviceTag}): carried on in low memory`);
+      lowMemory = true;
+      resetWorker();
+      setPageStatus("Running short of memory: carrying on more slowly…");
+      setTimeout(readScan); // once this read has finished below
+      return;
+    }
     // Not carried on by itself either: it would fail the same way at each
     // launch, and be counted as the phone closing the page (read-gave-up).
     if (saved) await db.update(scanId, { stopped: true }).catch(() => {});
@@ -1462,7 +1477,8 @@ async function readScan() {
     if (/no available backend found|initWasm/.test(e.message)) resetWorker();
     track("read-failed");
     track(`read-failed (${deviceTag})`);
-    track(`read-failed (${deviceTag}): ${failureReason(e)}`);
+    track(`read-failed (${deviceTag}): ${failureReason(e)}${lowMemory ? " (low memory)" : ""}`);
+    if (outOfMemory) resetWorker();
     // A long error ends with the actual error; show that first, since the
     // whole message can run off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
@@ -1482,7 +1498,9 @@ async function readScan() {
     setPageStatus(
       NO_MUSIC.test(e.message)
         ? `Page ${page} doesn't look like sheet music.\nRetake the photo straight on, in good light, or remove it (×) and press Read music again.`
-        : `Couldn't read page ${page}: ${why}`,
+        : outOfMemory
+          ? `Couldn't read page ${page}: there wasn't enough memory.\nClose other apps and browser tabs, then tap Read music to carry on from this page.`
+          : `Couldn't read page ${page}: ${why}`,
     );
     return;
   } finally {
