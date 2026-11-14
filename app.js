@@ -217,11 +217,10 @@ function reportLabels() {
   const button = !what ? "Send report" : n ? `Send report with the ${what}` : "Send report with score";
   $("report-share").textContent = $("report-share").dataset.label = button;
   $("report-status").textContent = "";
-  $("report-other").hidden = true;
   reportPrepared = null;
   const steps = [
     "Describe what happened above.",
-    `${isMobile() ? "Tap" : "Click"} <b>${button}</b>: ${what ? `the ${what} ${n > 1 ? "are" : "is"} uploaded, encrypted, and ` : ""}an email to <b>${REPORT_TO}</b> opens${what ? " with a link to " + (n > 1 ? "them" : "it") : ""}.`,
+    `${isMobile() ? "Tap" : "Click"} <b>${button}</b>: ${what ? `the ${what} ${n > 1 ? "are" : "is"} uploaded and ` : ""}an email to <b>${REPORT_TO}</b> opens${what ? " with a link to " + (n > 1 ? "them" : "it") : ""}.`,
     "Send the email.",
   ];
   $("report-steps").innerHTML = steps.map((s) => `<li>${s}</li>`).join("");
@@ -281,18 +280,13 @@ $("intro-video").onclick = (e) => {
 };
 $("intro-video-player").addEventListener("play", () => track("video-play (start screen)", "Getting started video"), { once: true });
 
-function reportText() {
-  return `${$("report-text").value.trim() || "(no description)"}\n\n---\n${$("report-diag").textContent}`;
-}
-
 // One button: the score (or the unread pages) goes up to the share relay,
 // encrypted like a shared link (share.js), and an email to bugs@partsong.app
 // opens with the description, the link and the details: nothing to attach or
 // address (many reports were started and never sent when the share sheet
 // left people to choose an app and paste the address). If the upload fails,
-// the score or pages are shared as files instead (phones: share sheet;
-// desktop: downloads to attach). No mail app: "Share it another way".
-let reportPrepared = null; // { mail, title, body }: ready, waiting for a tap
+// try again, or untick Include the score to send the report without it.
+let reportPrepared = null; // { mail }: the email, ready, waiting for a tap
 const reportEntry = () => {
   const blobs = reportPages().map((p) => p.blob);
   if (blobs.length) return { id: crypto.randomUUID(), title: "Pages from a problem report", created: Date.now(), pages: [], images: blobs };
@@ -303,7 +297,6 @@ const reportEntry = () => {
 function openMail() {
   Object.assign(document.createElement("a"), { href: reportPrepared.mail }).click(); // tests stub it so no mail app opens
   $("report-status").textContent = "Your email app should open with the report. Send it from there.";
-  $("report-other").hidden = false;
 }
 $("report-share").onclick = async () => {
   if (reportPrepared) return openMail();
@@ -314,24 +307,28 @@ $("report-share").onclick = async () => {
   const title = `Partsong problem${what ? `: ${what}` : ""}`;
   const pageCount = reportIncludes() ? reportPages().length : 0;
   const entry = reportIncludes() ? reportEntry() : null;
+  const thing = pageCount ? (pageCount > 1 ? "pages" : "page") : "score";
   button.disabled = true;
   try {
     let link = null;
     if (entry) {
       if (pageCount) track("report-with-pages");
-      status.textContent = `Uploading the ${pageCount ? (pageCount > 1 ? "pages" : "page") : "score"}…`;
+      status.textContent = `Uploading the ${thing}…`;
       const made = await shareableScore(entry);
       link = made.link;
-      if (!link) return await reportWithFile(made.file, made.why, title);
+      if (!link) {
+        status.textContent = `Couldn't upload the ${thing} (${made.why}). Try again, or untick Include the ${thing} to send the report without it.`;
+        return;
+      }
     }
     let details = $("report-diag").textContent;
     if (details.length > 5000) details = details.slice(0, 5000) + "\n…(trimmed)";
     const body = `${$("report-text").value.trim() || "(no description)"}\n\n` +
-      (link ? `${pageCount ? (pageCount > 1 ? "The pages" : "The page") : "The score"} (opens in Partsong): ${link}\n\n` : "") + `---\n${details}`;
-    reportPrepared = { mail: `mailto:${REPORT_TO}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`, title, body };
+      (link ? `The ${thing} (opens in Partsong): ${link}\n\n` : "") + `---\n${details}`;
+    reportPrepared = { mail: `mailto:${REPORT_TO}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}` };
     if (navigator.userActivation?.isActive === false) {
-      button.textContent = "Open the email";
-      status.textContent = "Ready. Tap Open the email.";
+      button.textContent = "Send email";
+      status.textContent = "Ready. Tap Send email.";
     } else openMail();
   } catch (e) {
     reportPrepared = null;
@@ -345,49 +342,7 @@ $("report-text").addEventListener("input", () => {
   if (!reportPrepared) return;
   reportPrepared = null;
   $("report-share").textContent = $("report-share").dataset.label;
-  $("report-other").hidden = true;
 });
-// No email opened (no mail app set up): the share sheet, or on a computer the
-// report copied, to send to the address some other way.
-$("report-other").onclick = async () => {
-  const { title, body } = reportPrepared ?? {};
-  if (!body) return;
-  const text = `To: ${REPORT_TO}\n\n${body}`;
-  navigator.clipboard?.writeText(REPORT_TO).catch(() => {});
-  if (isMobile() && navigator.canShare?.({ title, text })) {
-    try {
-      await navigator.share({ title, text });
-      $("report-status").textContent = `Thanks! Remember to paste ${REPORT_TO} into To.`;
-    } catch {}
-    return;
-  }
-  await navigator.clipboard?.writeText(text).catch(() => {});
-  $("report-status").textContent = `The report is copied: paste it into an email to ${REPORT_TO}.`;
-};
-// The upload failed: the score or pages go as files, as before.
-async function reportWithFile(file, why, title) {
-  const status = $("report-status");
-  const files = reportPages().length
-    ? reportPages().map((p) => new File([p.blob], `page-${pages.indexOf(p) + 1}.${p.blob.type === "image/png" ? "png" : "jpg"}`, { type: p.blob.type || "image/jpeg" }))
-    : [file];
-  const text = `To: ${REPORT_TO}\n\n${reportText()}`;
-  navigator.clipboard?.writeText(REPORT_TO).catch(() => {});
-  if (isMobile() && navigator.canShare?.({ files, title, text })) {
-    try {
-      await navigator.share({ files, title, text });
-      status.textContent = `Couldn't upload (${why}), so it was shared as a file. Remember to paste ${REPORT_TO} into To.`;
-    } catch (e) {
-      status.textContent = e.name === "NotAllowedError" ? `Couldn't upload (${why}). Tap the button again to share it as a file.` : e.name === "AbortError" ? "" : `Couldn't share: ${e.message}`;
-    }
-    return;
-  }
-  for (const f of files) await shareFile(f, title); // downloads on desktop
-  let body = reportText();
-  if (body.length > 6000) body = body.slice(0, 6000) + "\n…(trimmed)";
-  Object.assign(document.createElement("a"), { href: `mailto:${REPORT_TO}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}` }).click();
-  status.textContent = `Couldn't upload (${why}). Attach ${files.map((f) => f.name).join(" and ")} (in your Downloads) to the email, then send.`;
-}
-
 // ---------- updates: tell people (installed apps rarely restart) ----------
 
 // A deploy stamps its version into index.html (scripts/stamp-version.mjs).

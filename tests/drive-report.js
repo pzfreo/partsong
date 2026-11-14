@@ -2,9 +2,8 @@
 // and an email to bugs@partsong.app opens with the description, the link and
 // the technical details; nothing to attach or address. Unticking Include the
 // score sends the report without it. From home, no upload.
-// After a slow upload the email opens on the next tap (Open the email). No
-// email app: Share it another way. If the upload fails, the score file is
-// shared as before. Technical details expand; Back, ✕ and tapping outside close it.
+// After a slow upload the email opens on the next tap (Send email). If the
+// upload fails: try again, or untick the score. Technical details expand; Back, ✕ and tapping outside close it.
 // Needs the relay running locally: in relay/,
 //   npx wrangler dev --port 8787 --var "ORIGINS:http://localhost:8765"
 // then run against http://localhost:8765/index.html.
@@ -56,11 +55,6 @@ const m = mail();
 const got = await entryFromRelay(m.link);
 r.phone.mail = { to: m.to, subject: m.subject, startsWithText: m.body.startsWith("Altos get"), hasDetails: m.body.includes("Position: Bar 7"), link: !!m.link, status: $("report-status").textContent };
 r.phone.uploaded = { title: got.title, pages: got.pages.length, photos: got.images.length, mine: got.mine };
-r.phone.otherShown = !$("report-other").hidden;
-// No email app: the share sheet, with the address in the text.
-$("report-other").click();
-await waitFor(() => shared, 5000, "share another way");
-r.phone.other = { files: shared.files?.length ?? 0, to: shared.text.startsWith("To: bugs@partsong.app"), link: shared.text.includes(m.link) };
 await shot(false);
 $("report-close").click(); await sleep(300);
 r.closeX = $("report").hidden && !$("practice").hidden;
@@ -70,7 +64,7 @@ mailto = null;
 setActive(false);
 await openFromSettings();
 $("report-share").click();
-await waitFor(() => $("report-share").textContent === "Open the email", 30000, "ready");
+await waitFor(() => $("report-share").textContent === "Send email", 30000, "ready");
 r.slow = { mailtoBeforeTap: mailto, status: $("report-status").textContent };
 $("report-share").click();
 r.slow.opened = !!mailto;
@@ -97,13 +91,13 @@ await openFromSettings();
 r.untick.tickedAgainNextTime = $("report-include").checked && $("report-share").textContent === "Send report with score";
 $("report-close").click(); await sleep(300);
 
-// The upload fails: the score file goes by the share sheet, as before.
+// The upload fails: try again, or untick the score. No share sheet, no email.
 localStorage.setItem("partsong.relay", "http://localhost:9");
 shared = null; mailto = null;
 await openFromSettings();
 $("report-share").click();
-await waitFor(() => shared, 30000, "file shared");
-r.failed = { file: shared.files?.[0]?.name, to: shared.text.startsWith("To: bugs@partsong.app"), mailto, status: $("report-status").textContent };
+r.failed = { status: await waitFor(() => /Couldn't upload/.test($("report-status").textContent) && $("report-status").textContent, 30000, "failed") };
+r.failed.shared = shared; r.failed.mailto = mailto;
 $("report-close").click(); await sleep(300);
 localStorage.setItem("partsong.relay", "http://localhost:8787");
 
@@ -137,11 +131,11 @@ r.ok = r.buttons.join() === "report-close,report-share" && r.detailsOpen && r.ph
   r.phone.mail.to === "bugs@partsong.app" && r.phone.mail.subject === "Partsong problem: Altos get the soprano run in bar 20" &&
   r.phone.mail.startsWithText && r.phone.mail.hasDetails && r.phone.mail.link &&
   r.phone.uploaded.title === "Huron" && r.phone.uploaded.pages === 1 && r.phone.uploaded.photos === 1 && r.phone.uploaded.mine === 2 &&
-  r.phone.otherShown && r.phone.other.files === 0 && r.phone.other.to && r.phone.other.link && r.closeX &&
+  r.closeX &&
   r.slow.mailtoBeforeTap === null && r.slow.opened && r.slow.resetOnEdit &&
   r.untick.shown && r.untick.label === "Include the score" && r.untick.ticked && r.untick.button === "Send report" &&
   r.untick.step === "Tap Send report: an email to bugs@partsong.app opens." && r.untick.link === null && r.untick.tickedAgainNextTime &&
-  r.failed.file === "Huron.partsong.pdf" && r.failed.to && r.failed.mailto === null &&
+  r.failed.status === "Couldn't upload the score (couldn't reach the link service). Try again, or untick Include the score to send the report without it." && r.failed.shared === null && r.failed.mailto === null &&
   r.desktop.result.link && r.desktop.result.downloaded === null && r.tapOutsideCloses &&
   r.wentHome && r.home.button === "Send report" && !r.home.includeShown && r.home.link === null && r.backCloses;
 window.result = r;
