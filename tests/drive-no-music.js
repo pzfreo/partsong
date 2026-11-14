@@ -3,7 +3,10 @@
 // PDF), its size, how many systems were found and how many scores this
 // device has read before. A device that has read a score before is asked,
 // politely, whether it's sheet music and they'd send it: Send it to us opens
-// the report with the page attached; No thanks puts the question away.
+// the report, which uploads the page (as a link) and opens an email; the link
+// opens the page as a new scan. No thanks puts the question away.
+// Needs the relay running locally: in relay/,
+//   npx wrangler dev --port 8787 --var "ORIGINS:http://localhost:8765"
 //   CHROME_FLAGS="--mute-audio --host-resolver-rules=MAP gc.zgo.at ~NOTFOUND" \
 //     node scripts/headless-test.mjs http://localhost:8765/index.html out.json 240 tests/drive-no-music.js
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -12,6 +15,7 @@ const $ = (id) => document.getElementById(id);
 const events = [];
 window.goatcounter = { count: (e) => events.push(e.path) };
 await new Promise((res) => { const q = indexedDB.open("partscanner", 1); q.onupgradeneeded = () => q.result.createObjectStore("scores", { keyPath: "id" }); q.onsuccess = () => { const tx = q.result.transaction("scores", "readwrite"); tx.objectStore("scores").clear(); tx.oncomplete = res; }; });
+localStorage.setItem("partsong.relay", "http://localhost:8787");
 localStorage.setItem("partsong-reads", "0"); // never read a score (yet)
 // A page with no music: a photo of plain paper with a line of "text".
 const c = Object.assign(document.createElement("canvas"), { width: 1500, height: 2000 });
@@ -45,18 +49,22 @@ r.sendShown = !$("no-music-send").hidden;
 { const b = $("no-music-send").getBoundingClientRect(); r.inView = b.top >= 0 && b.bottom <= innerHeight + 1; }
 r.counted = events.filter((p) => p.startsWith("read-no-music"));
 
-// Send it to us: the report, with the page.
-let shared = null;
-Object.defineProperty(navigator, "userAgentData", { value: { mobile: true }, configurable: true });
-navigator.canShare = () => true;
-navigator.share = async (d) => { shared = d; };
+// Send it to us: the page goes up to the relay and the email carries its link.
+let mailto = null;
+const origClick = HTMLAnchorElement.prototype.click;
+HTMLAnchorElement.prototype.click = function () { if (this.href.startsWith("mailto:")) mailto = this.href; else origClick.call(this); };
+Object.defineProperty(navigator, "userActivation", { value: { isActive: true }, configurable: true }); // a script's clicks aren't taps
 r.ask = $("no-music-send").textContent.replace(/\s+/g, " ").trim();
 $("no-music-yes").click();
 await sleep(300);
 r.report = { open: !$("report").hidden, button: $("report-share").textContent, text: $("report-text").value };
 $("report-share").click();
-await waitFor(() => shared, 10000, "shared");
-r.sent = { files: shared.files.map((f) => `${f.name} ${f.type} ${f.size > 1000}`), mentionsAddress: shared.text.includes("bugs@partsong.app") };
+await waitFor(() => mailto, 30000, "mailto");
+HTMLAnchorElement.prototype.click = origClick;
+const body = new URL(mailto).searchParams.get("body");
+const fragment = /#(s=[\w-]+\.[\w-]+)/.exec(body)?.[1];
+const got = await (await import("/share.js")).entryFromRelay(fragment);
+r.sent = { to: new URL(mailto).pathname, says: /The page \(opens in Partsong\): http/.test(body), title: got.title, pages: got.pages.length, photos: got.images.length };
 r.reportCounted = events.filter((p) => /^(report|no-music-ask)/.test(p));
 $("report-close").click(); await sleep(200);
 
@@ -70,10 +78,19 @@ r.askedAgain = !$("no-music-send").hidden;
 $("no-music-no").click();
 r.noThanks = { hidden: $("no-music-send").hidden, counted: events.includes("no-music-ask: no thanks") };
 
+// Opening the report's link: the page arrives as a new scan, to read again.
+location.hash = fragment;
+await waitFor(() => !$("import-offer").hidden, 30000, "offer");
+r.received = { question: $("import-question").textContent };
+$("import-yes").click();
+await waitFor(() => !$("scan").hidden && $("pages").children.length === 1, 10000, "new scan");
+r.received.scan = { pages: $("pages").children.length, name: $("scan-name").value };
+
 r.ok = r.hiddenBefore && !r.newcomerAsked && r.sendShown && r.inView &&
   JSON.stringify(r.counted.slice(0, 2)) === JSON.stringify(["read-no-music (iPad dev): camera, 3 MP, 0 systems, reads before 0", "read-no-music (iPad dev): camera, 3 MP, 0 systems, reads before 2"]) &&
-  r.report.open && r.report.button === "Share report with the page" && /isn't sheet music, but it is/.test(r.report.text) &&
-  JSON.stringify(r.sent.files) === JSON.stringify(["page-1.jpg image/jpeg true"]) && r.sent.mentionsAddress &&
+  r.report.open && r.report.button === "Send report with the page" && /isn't sheet music, but it is/.test(r.report.text) &&
+  r.sent.to === "bugs@partsong.app" && r.sent.says && r.sent.title === "Pages from a problem report" && r.sent.pages === 0 && r.sent.photos === 1 &&
+  r.received.question === "Open the page from this problem report as a new scan?" && r.received.scan.pages === 1 &&
   ["no-music-ask: shown", "no-music-ask: send", "report", "report-with-pages"].every((p) => r.reportCounted.includes(p)) && r.hiddenAfterChange &&
   r.askedAgain && r.noThanks.hidden && r.noThanks.counted;
 window.result = r;
