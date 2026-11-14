@@ -54,7 +54,7 @@ await tap($("settings"));
 await sleep(1000);
 await voWait();
 into($("lines")); await sleep(800);
-await voStart("parts", "Choose your part from the list,", "or mark it on the music: that works for any score.", "top");
+await voStart("parts", "If the list doesn't make sense,", "or to fine-tune it: mark your part on the music.", "top");
 await sleep(2500);
 await tap($("start-markup"));
 await voWait();
