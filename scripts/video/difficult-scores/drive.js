@@ -45,9 +45,15 @@ rec(false);
 await waitFor(() => !$("practice").hidden, 900000, "read");
 await sleep(2500);
 await hush();
-if ($("panel").hidden) { $("settings").click(); await sleep(800); }
-into($("lines")); await sleep(800);
+// The panel opens by itself after a first reading: close it, to show where it's opened from.
+if (!$("panel").hidden) { $("panel-close").click(); await sleep(800); }
 rec(true);
+await voStart("settings", "To choose your part:", "tap the settings button.", "top");
+await sleep(600);
+await tap($("settings"));
+await sleep(1000);
+await voWait();
+into($("lines")); await sleep(800);
 await voStart("parts", "When the layout changes, the list of parts can be a muddle,", "so mark your part on the music instead.", "top");
 await sleep(2500);
 await tap($("start-markup"));
