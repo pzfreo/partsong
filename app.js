@@ -2613,6 +2613,12 @@ $("fix-done").onclick = () => {
   readScan();
 };
 
+// A staff's lines, upper voice first. Parts numbered by voice (a score whose
+// staves change) have no upper/lower of their own: the lower-numbered part is
+// the upper voice.
+const VOICE_ORDER = { upper: 0, only: 1, lower: 2 };
+const voicesOn = (staff) => staff.lines.slice().sort((a, b) => VOICE_ORDER[score.lines[a].voice] - VOICE_ORDER[score.lines[b].voice] || a - b);
+
 // Tap a staff to mark it as yours in that system. Tapping the marked staff
 // again steps upper voice -> lower voice -> unmarked (one-voice staff: unmarks).
 function toggleMark(page, e) {
@@ -2627,8 +2633,7 @@ function toggleMark(page, e) {
   const best = cands[0];
   if (!best) return;
   const { sys, staff } = best;
-  const order = { upper: 0, only: 1, lower: 2 };
-  const choices = staff.lines.slice().sort((a, b) => order[score.lines[a].voice] - order[score.lines[b].voice]);
+  const choices = voicesOn(staff);
   // The same staff can belong to two systems the reader split one row into:
   // mark (or unmark) it in each, starting over unless it's marked in all.
   const targets = [best, ...cands.filter((c) => c.sys !== sys && c.dy === 0 && best.dy === 0 && c.staff.key === staff.key)];
@@ -2642,8 +2647,7 @@ function toggleMark(page, e) {
     delete manual[c.sys.index];
     delete markedStaff[c.sys.index];
     if (next == null) continue;
-    const voice = score.lines[next].voice;
-    manual[c.sys.index] = c.staff.lines.find((id) => score.lines[id].voice === voice) ?? c.staff.lines[0];
+    manual[c.sys.index] = voicesOn(c.staff)[choices.indexOf(next)] ?? c.staff.lines[0];
     markedStaff[c.sys.index] = c.staff.key;
   }
   setMarks(manual, markedStaff);
@@ -2674,14 +2678,14 @@ function renderMarks() {
       rect.setAttribute("height", staff.y1 - staff.y0 + 2 * py);
       rect.setAttribute("rx", view.w * 0.006);
       view.marks.append(rect);
-      if (line.voice !== "only" && staff.lines.length > 1) {
+      if (staff.lines.length > 1) {
         const label = document.createElementNS(SVG, "text");
         label.setAttribute("class", "mark-label");
         label.setAttribute("x", x1 + px - view.w * 0.005);
         label.setAttribute("y", staff.y0 - py - view.h * 0.004);
         label.setAttribute("text-anchor", "end");
         label.setAttribute("font-size", view.w * 0.03);
-        label.textContent = line.voice === "upper" ? "upper voice" : "lower voice";
+        label.textContent = voicesOn(staff)[0] === Number(lineId) ? "upper voice" : "lower voice";
         view.marks.append(label);
       }
     }
