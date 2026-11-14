@@ -42,10 +42,10 @@ const tap = async (el, click = true, before = null) => {
   await sleep(200);
   const r = el.getBoundingClientRect();
   dot.style.left = r.left + r.width / 2 + "px"; dot.style.top = r.top + r.height / 2 + "px";
-  dot.classList.add("on"); await sleep(600);
+  dot.classList.add("on"); await sleep(900);
   before?.();
   if (click) el.click();
-  await sleep(250); dot.classList.remove("on");
+  await sleep(600); dot.classList.remove("on");
 };
 const showCard = (html) => { card.innerHTML = html; card.classList.remove("off"); };
 const hideCard = async () => { card.classList.add("off"); await sleep(600); };
@@ -105,9 +105,9 @@ const tapPage = async (scope, p, fx, fy, zoom = 1) => {
   const r = svg().getBoundingClientRect();
   const x = r.left + fx * r.width, y = r.top + fy * r.height;
   dot.style.left = x + "px"; dot.style.top = y + "px";
-  dot.classList.add("on"); await sleep(450);
+  dot.classList.add("on"); await sleep(800);
   svg().dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: x, clientY: y }));
-  await sleep(250); dot.classList.remove("on");
+  await sleep(600); dot.classList.remove("on");
 };
 const zoomOut = async () => {
   if (!zoomed) return;

@@ -55,9 +55,10 @@ await sleep(1000);
 await voWait();
 into($("lines")); await sleep(800);
 await voStart("parts", "If the list doesn't make sense,", "or to fine-tune it: mark your part on the music.", "top");
-await sleep(2500);
-await tap($("start-markup"));
+// The tap once the voiceover has said "mark your part on the music".
 await voWait();
+await tap($("start-markup"));
+await sleep(600);
 await voStart("mark", "Tap your staff in each line of music.", "Here, the alto.", "top");
 for (const y of [175, 375, 641, 835]) await tapPage("#photo-list", 0, 0.35, y / 990, 1.8);
 await voWait();
