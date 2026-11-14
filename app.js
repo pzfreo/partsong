@@ -188,11 +188,16 @@ function diagnostics() {
 // After "doesn't look like sheet music", asked (Send it to us): the report carries the
 // pages (up to 3), so we can see whether the reader missed real music.
 const reportPages = () => (!$("scan").hidden && !$("no-music-send").hidden ? pages.filter((p) => !p.xml).slice(0, 3) : []);
+const NO_MUSIC_REPORT = "Partsong said this isn't sheet music, but it is.";
 function openReport(e) {
   $("report-diag").textContent = diagnostics();
   const n = reportPages().length;
-  if (n && e?.currentTarget?.closest?.("#no-music-send") && !$("report-text").value.trim())
-    $("report-text").value = "Partsong said this isn't sheet music, but it is.";
+  // Filled in for the "Is this sheet music?" question only (it used to stay
+  // for every later report).
+  const fromAsk = n > 0 && !!e?.currentTarget?.closest?.("#no-music-send");
+  const text = $("report-text").value.trim();
+  if (fromAsk && !text) $("report-text").value = NO_MUSIC_REPORT;
+  else if (!fromAsk && text === NO_MUSIC_REPORT) $("report-text").value = "";
   const what = n ? (n > 1 ? "pages" : "page") : !$("practice").hidden && current ? "score" : "";
   const button = n ? `Send report with the ${what}` : what ? "Send report with score" : "Send report";
   $("report-share").textContent = $("report-share").dataset.label = button;

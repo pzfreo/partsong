@@ -67,6 +67,10 @@ const got = await (await import("/share.js")).entryFromRelay(fragment);
 r.sent = { to: new URL(mailto).pathname, says: /The page \(opens in Partsong\): http/.test(body), title: got.title, pages: got.pages.length, photos: got.images.length };
 r.reportCounted = events.filter((p) => /^(report|no-music-ask)/.test(p));
 $("report-close").click(); await sleep(200);
+// Any other report starts empty (the filled-in sentence used to stay).
+document.querySelector("#home .report-open").click(); await sleep(200);
+r.otherReportText = $("report-text").value;
+$("report-close").click(); await sleep(200);
 
 // Adding another page hides the offer (the scan has changed).
 pick($("gallery"));
@@ -86,7 +90,7 @@ $("import-yes").click();
 await waitFor(() => !$("scan").hidden && $("pages").children.length === 1, 10000, "new scan");
 r.received.scan = { pages: $("pages").children.length, name: $("scan-name").value };
 
-r.ok = r.hiddenBefore && !r.newcomerAsked && r.sendShown && r.inView &&
+r.ok = r.otherReportText === "" && r.hiddenBefore && !r.newcomerAsked && r.sendShown && r.inView &&
   JSON.stringify(r.counted.slice(0, 2)) === JSON.stringify(["read-no-music (iPad dev): camera, 3 MP, 0 systems, reads before 0", "read-no-music (iPad dev): camera, 3 MP, 0 systems, reads before 2"]) &&
   r.report.open && r.report.button === "Send report with the page" && /isn't sheet music, but it is/.test(r.report.text) &&
   r.sent.to === "bugs@partsong.app" && r.sent.says && r.sent.title === "Pages from a problem report" && r.sent.pages === 0 && r.sent.photos === 1 &&
