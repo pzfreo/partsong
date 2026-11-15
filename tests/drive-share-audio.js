@@ -1,6 +1,7 @@
 // Share audio: what Play plays, rendered offline to an .m4a (AAC) where the
 // browser can encode it, else .wav. Seeds Huron from testdata.
 // Run against http://localhost:8765/index.html.
+const events = []; window.goatcounter = { count: (e) => events.push(e.path) };
 // Say yes to "Are you allowed to share this music?" (tests/drive-share-rights.js tests it).
 new MutationObserver(() => { if (!document.getElementById("rights").hidden) document.getElementById("rights-yes").click(); }).observe(document.getElementById("rights"), { attributes: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -68,6 +69,8 @@ const enc = window.AudioEncoder;
 delete window.AudioEncoder;
 $("others").value = 25; $("others").dispatchEvent(new Event("input"));
 $("tempo").value = 121; $("tempo").dispatchEvent(new Event("input")); // a change, so it renders again
+// Play set to start part-way through: the recording is still the whole piece.
+$("from-bar").value = 10; $("from-bar").onchange();
 r.wav = await shareAudio();
 // Reopening the panel with nothing changed: still ready to share.
 $("settings").click(); await sleep(300);
@@ -75,4 +78,9 @@ r.reopenedLabel = $("share-audio").textContent;
 $("panel-close").click(); await sleep(200);
 window.AudioEncoder = enc;
 r.bars = bars;
+r.events = events.filter((p) => p.startsWith("share-audio"));
+// The whole piece each time (the WAV at 121 instead of 120 bpm), counted with the device.
+r.ok = !!r.m4a.seconds && Math.abs(r.wav.seconds - r.m4a.seconds * 120 / 121) < 0.3 && r.partAlone.seconds === r.m4a.seconds &&
+  r.events.filter((p) => p === "share-audio").length === 3 && r.events.filter((p) => p .match?.(/^share-audio \(\w+ dev\): retry$/) && true).length === 3 &&
+  r.events.filter((p) => p .match?.(/^share-audio \(\w+ dev\): shared$/) && true).length === 3;
 window.result = r;

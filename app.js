@@ -1755,18 +1755,20 @@ function linkFailed(id, button, status, label, { file, title, why }) {
   status.replaceChildren(`Couldn't make a link: ${why ?? "the link service didn't respond"}. `, again, " · ", pdf);
 }
 
-// An audio file of what Play plays (bars, repeats, your part, the others'
+// An audio file of the whole piece as Play plays it (repeats, your part, the others'
 // volume, sound, tempo and pitch), rendered offline, to share: e.g. for
 // someone to learn their part from on the way to rehearsal. The share sheet
 // only opens within a few seconds of a tap, and rendering can take longer on a
 // phone; then the file is kept ("Ready to share: tap again") until anything
 // that's heard changes.
 const SHARE_AUDIO = "Send a recording of my part";
+// Start to finish, whatever bars Play is set to.
+const wholeSegments = () => playSegments([1, score.measures.length]);
 const SHARE_SCORE = "Send a link to another singer";
 const EXPORT_PDF = "Save as a PDF file";
 let preparedAudio = null; // { key, file, part }
 function audioKey() {
-  return JSON.stringify([current?.id, playSegments(), current.mine, current.manual, current.excluded, current.octave, othersGain, $("instrument").value, $("tempo").value]);
+  return JSON.stringify([current?.id, wholeSegments(), current.mine, current.manual, current.excluded, current.octave, othersGain, $("instrument").value, $("tempo").value]);
 }
 // A prepared file that no longer matches the settings is dropped.
 function updateAudioButton(checkLink = true) {
@@ -1793,11 +1795,12 @@ $("share-audio").onclick = async () => {
       renderer.bpm = Number($("tempo").value);
       renderer.instrument = $("instrument").value;
       const name = `${current.title} - ${part}`.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
-      preparedAudio = { key, part, file: await audioFile(await renderer.render(playSegments(), AUDIO_RATE), name) };
+      preparedAudio = { key, part, file: await audioFile(await renderer.render(wholeSegments(), AUDIO_RATE), name) };
       button.classList.add("ready");
     }
     const how = await shareFile(preparedAudio.file, `${current.title} (${preparedAudio.part})`);
     if (how === "shared" || how === "downloaded") track("share-audio");
+    track(`share-audio (${deviceTag}): ${how}`);
     if (how === "retry") say("ready", "", "Ready to share");
     else if (how === "cancelled") say("idle", "");
     else say("done", "", how === "downloaded" ? "Saved ✓" : "Shared ✓");
@@ -2848,8 +2851,7 @@ function barRange() {
 
 // What to play for the chosen bars: stretches of the score in order, taking
 // repeats (unless switched off) with any corrected repeat starts.
-function playSegments() {
-  const [from, to] = barNumbers();
+function playSegments([from, to] = barNumbers()) {
   const targets = Object.fromEntries(Object.entries(current.repeats ?? {}).map(([bar, toBar]) => [bar - 1, toBar - 1]));
   const order = current.playRepeats === false
     ? Array.from({ length: to - from + 1 }, (_, i) => from - 1 + i)
