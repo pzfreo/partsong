@@ -540,7 +540,9 @@ const squeeze = async (bytes, fmt, Stream) => new Uint8Array(await new Response(
 // usable; only a trap (WebAssembly.RuntimeError) drops it, as its state may
 // be broken. Requests come one at a time (app.js awaits each).
 let pageReader = null;
-async function openPage(imageBytes, systemsJson, packed) {
+// page.image, and its pixels, are let go once they're in the reader, so they
+// aren't kept while segnet runs (a phone's photo: about 50 MB).
+async function openPage(page, systemsJson, packed) {
   const rs = (pageReader ??= (await WebAssembly.instantiate(wasmModule, {})).exports);
   rs.page_close();
   const mem = () => rs.memory.buffer;
@@ -554,13 +556,17 @@ async function openPage(imageBytes, systemsJson, packed) {
   const ms = {};
   let t = performance.now();
   const lap = (k) => { const n = performance.now(); ms[k] = n - t; t = n; };
-  const img = await pixels(imageBytes);
+  let img = await pixels(page.image);
+  page.image = null;
   lap("decode");
   const ranges = systemsJson ? JSON.parse(systemsJson).flat() : [];
   const rgba = copyIn(img.data);
+  const { width, height } = img;
+  const bytes = img.data.byteLength;
+  img = null;
   const sys = copyIn(Float64Array.from(ranges));
-  const tiles = rs.page_open(rgba, img.width, img.height, sys, ranges.length / 2);
-  rs.dealloc(rgba, img.data.byteLength);
+  const tiles = rs.page_open(rgba, width, height, sys, ranges.length / 2);
+  rs.dealloc(rgba, bytes);
   rs.dealloc(sys, ranges.length * 8);
   lap("tiles");
 
@@ -611,9 +617,13 @@ async function segment(rs, tiles) {
 
 // The page's systems before reading any staff (see page_layout), and its
 // segmentation to read it with later.
-async function layout(imageBytes, systemsJson) {
+async function layout(page, systemsJson) {
   const t = performance.now();
-  const { rs, message, classes, ms: open } = await openPage(imageBytes, systemsJson);
+  // segnet first, then the page, as recognise() does: loading it makes
+  // short-lived copies, and on top of the page's picture opening that was the
+  // peak of finding systems (Chrome, a phone photo: about 950 MB).
+  await session(MODELS[0]);
+  const { rs, message, classes, ms: open } = await openPage(page, systemsJson);
   const t1 = performance.now();
   rs.page_layout();
   const t2 = performance.now();
@@ -625,7 +635,7 @@ async function layout(imageBytes, systemsJson) {
   return out;
 }
 
-async function recognise(imageBytes, systemsJson, packed) {
+async function recognise(page, systemsJson, packed) {
   // The models first, then the page: loading them makes short-lived copies,
   // and with the page's picture open as well that was the read's peak
   // (iPhone simulator, sample: 1.23 GB for a moment, now 0.99 GB; 0.79 GB
@@ -644,7 +654,7 @@ async function recognise(imageBytes, systemsJson, packed) {
   }
   const decoder = await rustDecoder();
   const encoder = exactEncoder ? null : await session(MODELS[1]);
-  const { rs, mem, copyIn, message } = await openPage(imageBytes, systemsJson, packed);
+  const { rs, mem, copyIn, message } = await openPage(page, systemsJson, packed);
 
   let staff = 0;
   for (;;) {
@@ -721,7 +731,9 @@ self.onmessage = async ({ data }) => {
       await tuning;
       const t0 = performance.now();
       runTimes = [];
-      const r = await layout(data.image, data.systems ?? "");
+      const page = { image: data.image };
+      data.image = null;
+      const r = await layout(page, data.systems ?? "");
       const ms = Math.round(performance.now() - t0);
       const seg = runTimes[sessionIds.get(MODELS[0])] ?? { ms: 0, calls: 0 };
       post({ type: "log", msg: `Systems in ${ms} ms: segnet ${Math.round(seg.ms)} ms/${seg.calls} calls; ${r.timing}` });
@@ -732,7 +744,9 @@ self.onmessage = async ({ data }) => {
       await tuning;
       const t0 = performance.now();
       runTimes = [];
-      const xml = await recognise(data.image, data.systems ?? "", data.classes);
+      const page = { image: data.image };
+      data.image = null;
+      const xml = await recognise(page, data.systems ?? "", data.classes);
       const ms = Math.round(performance.now() - t0);
       const names = [...sessionIds.keys()];
       const parts = names.map((n) => `${n.split("_")[0]} ${Math.round(runTimes[sessionIds.get(n)]?.ms ?? 0)} ms/${runTimes[sessionIds.get(n)]?.calls ?? 0} calls`);
