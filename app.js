@@ -990,7 +990,10 @@ async function resumeUnfinished() {
   await db.update(entry.id, { resumes: resumes + 1 }).catch(() => {});
   // Where it was: a page's progress resets the count, so a give-up is one page killed three times.
   const n = entry.images?.length ?? 0;
-  const at = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
+  let hidden = null;
+  try { hidden = localStorage.getItem(READ_HIDDEN) === "1"; } catch {}
+  const where = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
+  const at = `${where}, ${hidden ? "in the background" : "on screen"}`;
   if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
   track(`read-restarted (${deviceTag}): ${at}`);
   lowMemory = true;
@@ -1027,16 +1030,28 @@ $("discard-scan").onclick = async () => {
 };
 
 // Keeps the screen on while reading; the lock lapses when the app is hidden,
-// so it's taken again on return.
+// so it's taken again on return. Whether the app is hidden is noted too, so a
+// restart can say if the phone closed it in the background (left for another
+// app) or on screen (out of memory). Synchronous: a hidden page can be closed
+// at any moment.
+const READ_HIDDEN = "partsong-read-hidden";
+const noteHidden = () => {
+  try {
+    if (document.visibilityState === "visible") localStorage.removeItem(READ_HIDDEN);
+    else localStorage.setItem(READ_HIDDEN, "1");
+  } catch {}
+};
 function keepAwake() {
   let lock = null;
   const acquire = async () => {
+    noteHidden();
     if (document.visibilityState === "visible") lock = await navigator.wakeLock?.request("screen").catch(() => null);
   };
   document.addEventListener("visibilitychange", acquire);
   acquire();
   return () => {
     document.removeEventListener("visibilitychange", acquire);
+    try { localStorage.removeItem(READ_HIDDEN); } catch {}
     lock?.release().catch(() => {});
   };
 }
