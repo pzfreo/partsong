@@ -1255,7 +1255,7 @@ async function checkSystems(stopped) {
       // Progress is on the status line until the check opens, then on its bar.
       pageLabel = check ? "" : `Page ${i + 1} of ${pages.length}`;
       if (!check) setPageStatus("finding lines of music…");
-      check?.waiting(`Finding the lines of music (systems): page ${i + 1} of ${pages.length}…`);
+      check?.waiting(`Finding systems: page ${i + 1} of ${pages.length}…`);
       // A page whose systems were found before the app was closed (a phone
       // reloading under memory pressure) isn't done again.
       if (!pages[i].layout) {
@@ -1321,7 +1321,7 @@ function openCheck() {
   $("check-done").onclick = null;
   $("check-stop").hidden = false;
   $("recognise").hidden = true;
-  $("check-wait").textContent = "Finding the lines of music (systems)…";
+  $("check-wait").textContent = "Finding systems…";
   // In the bar, as the page pictures push read-hint off screen: phones close
   // apps left in the background, and this is the long wait (GoatCounter,
   // 18 Nov: most Android restarts here were "in the background").
@@ -2609,7 +2609,8 @@ function renderFix() {
 // far" while pages are still being found.
 function systemsCount(drafts, finished = true) {
   const n = Object.values(drafts).reduce((sum, d) => sum + (d.rows.length ? d.splits.filter(Boolean).length + 1 : 0), 0);
-  return `${n} system${n === 1 ? "" : "s"} ${finished ? "in all" : "so far"}.`;
+  // ("so far" beside "Finding systems: page 2 of 6…", which says what they are.)
+  return finished ? `${n} system${n === 1 ? "" : "s"} in all.` : `${n} so far.`;
 }
 
 $("start-fix").onclick = () => startMarkup("systems");

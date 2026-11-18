@@ -200,7 +200,11 @@ a.button { text-decoration: none; color: inherit; }
    became a tall narrow column on phones with large text. */
 .markup-bar { flex-wrap: wrap; gap: 8px 12px; }
 .markup-bar p { flex: 1 1 100%; margin: 0; font-size: 0.92rem; }
-.markup-bar p.check-keep { font-size: 0.82rem; color: var(--muted); }
+/* Progress with Cancel beside it (Cancel wraps under it if the text would
+   be squeezed, as with large text), then "keep it open" as a callout. */
+.check-row { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.check-row p { flex: 1 1 12em; }
+.markup-bar p.check-keep { background: var(--surface); border-left: 4px solid var(--gold); border-radius: 6px; padding: 6px 10px; font-size: 0.88rem; }
 .markup-bar p.check-keep[hidden] { display: none; }
 .markup-bar button { flex: 1; }
 .markup-bar button.link { flex: 0 0 auto; }
