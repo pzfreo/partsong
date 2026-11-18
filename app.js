@@ -2840,11 +2840,12 @@ $("others").oninput = () => {
   applyMix();
 };
 $("others").onchange = () => updateEntry(current.id, { others: Number($("others").value) });
+// (Guarded: Firefox has sent the slider's events before any score was open.)
 $("tempo").oninput = () => {
   updateLabels();
-  player.setTempo(Number($("tempo").value));
+  player?.setTempo(Number($("tempo").value));
 };
-$("tempo").onchange = () => updateEntry(current.id, { tempo: Number($("tempo").value) });
+$("tempo").onchange = () => current && updateEntry(current.id, { tempo: Number($("tempo").value) });
 $("title").onchange = () => {
   current.title = $("title").value.trim() || current.title;
   $("title").value = current.title;
