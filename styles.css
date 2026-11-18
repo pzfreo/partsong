@@ -200,6 +200,8 @@ a.button { text-decoration: none; color: inherit; }
    became a tall narrow column on phones with large text. */
 .markup-bar { flex-wrap: wrap; gap: 8px 12px; }
 .markup-bar p { flex: 1 1 100%; margin: 0; font-size: 0.92rem; }
+.markup-bar p.check-keep { font-size: 0.82rem; color: var(--muted); }
+.markup-bar p.check-keep[hidden] { display: none; }
 .markup-bar button { flex: 1; }
 .markup-bar button.link { flex: 0 0 auto; }
 /* The current-bar highlight would look like part of the marking. */

@@ -1322,6 +1322,10 @@ function openCheck() {
   $("check-stop").hidden = false;
   $("recognise").hidden = true;
   $("check-wait").textContent = "Finding the lines of music (systems)…";
+  // In the bar, as the page pictures push read-hint off screen: phones close
+  // apps left in the background, and this is the long wait (GoatCounter,
+  // 18 Nov: most Android restarts here were "in the background").
+  $("check-keep").hidden = false;
   $("systems-check").hidden = false;
   $("systems-check").scrollIntoView({ behavior: "smooth", block: "start" });
   return {
@@ -1369,6 +1373,7 @@ function openCheck() {
       const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
       $("check-intro").textContent = CHECK_LINES + (which.length ? ` ${named} unusual.` : "");
       $("check-wait").textContent = "Red lines look right?";
+      $("check-keep").hidden = true;
       $("check-stop").hidden = true;
       $("check-done").hidden = false;
       return new Promise((resolve) => {
