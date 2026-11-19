@@ -1326,7 +1326,7 @@ function openCheck() {
   $("check-stop").hidden = false;
   $("recognise").hidden = true;
   $("check-wait").textContent = "Finding systems…";
-  // In the bar, as the page pictures push read-hint off screen: phones close
+  // In the bar, where it's seen while checking (read-hint shows once reading the notes): phones close
   // apps left in the background, and this is the long wait (GoatCounter,
   // 18 Nov: most Android restarts here were "in the background").
   $("check-keep").hidden = false;
@@ -1403,7 +1403,6 @@ async function readScan() {
   $("no-music-send").hidden = true;
   $("scan").classList.add("reading");
   $("recognise").textContent = "Stop reading";
-  $("read-hint").hidden = false;
   const stopped = new Promise((_, reject) => {
     stopReading = () => {
       reject(new Stopped());
@@ -1427,7 +1426,8 @@ async function readScan() {
     // Systems you've just fixed are read as they are; Read again shows them
     // to check (the reader may group them differently now).
     if (!scanSettings.systemsChecked) await checkSystems(stopped);
-    $("read-step").hidden = false;
+    // (GoatCounter, 19 Nov: reads restarted here too, in the background.)
+    $("read-step").hidden = $("read-hint").hidden = false;
     let dropped = false;
     for (let i = 0; i < pages.length; i++) {
       if (pages[i].xml) continue;

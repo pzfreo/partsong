@@ -204,8 +204,8 @@ a.button { text-decoration: none; color: inherit; }
    be squeezed, as with large text), then "keep it open" as a callout. */
 .check-row { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .check-row p { flex: 1 1 12em; }
-.markup-bar p.check-keep { background: var(--surface); border-left: 4px solid var(--gold); border-radius: 6px; padding: 6px 10px; font-size: 0.88rem; }
-.markup-bar p.check-keep[hidden] { display: none; }
+.check-keep, .markup-bar p.check-keep { background: var(--surface); border-left: 4px solid var(--gold); border-radius: 6px; padding: 6px 10px; font-size: 0.88rem; }
+.check-keep[hidden], .markup-bar p.check-keep[hidden] { display: none; }
 .markup-bar button { flex: 1; }
 .markup-bar button.link { flex: 0 0 auto; }
 /* The current-bar highlight would look like part of the marking. */

@@ -186,6 +186,7 @@
       <label class="name-field">Name <input id="scan-name" placeholder="e.g. Messiah: Hallelujah chorus" autocomplete="off"></label>
       <button id="recognise" class="primary wide" disabled>Read music</button>
       <p id="read-step" class="check-step" hidden><strong>Step 3 of 3: reading the notes</strong></p>
+      <p id="read-hint" class="check-keep" hidden><strong>Keep Partsong open on this screen.</strong> If you switch to another app, it has to restart and takes much longer.</p>
       <div id="status" class="status" aria-live="polite"></div>
       <!-- After "doesn't look like sheet music", for singers who have read a score before. -->
       <div id="no-music-send" class="install-card" hidden>
@@ -209,7 +210,6 @@
           <button id="check-done" class="primary" hidden>Next: read the notes ▸</button>
         </div>
       </div>
-      <p id="read-hint" class="hint" hidden>Keep Partsong open on this screen until it finishes: phones pause apps in the background.</p>
       <button id="discard-scan" class="link discard">Discard this scan</button>
     </section>
 
