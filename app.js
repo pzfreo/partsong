@@ -39,10 +39,11 @@ const deviceKind = /iPhone|iPod/.test(ua) ? "iPhone" : iDevice ? "iPad" : /Andro
 // Counts by device carry the version too, to see whether a fix worked.
 const deviceTag = `${deviceKind} ${SHOWN_VERSION}`;
 
-function showError(message) {
+// where: the file and line it was thrown from, for uncaught errors ("app.js:2848").
+function showError(message, where = "") {
   remember(recentErrors, message, 10);
   // Counted once per kind of error a visit, as "error (Android): …".
-  const reason = failureReason(message);
+  const reason = failureReason(message) + (where && ` @ ${where}`);
   showError.counted ??= new Set();
   if (!showError.counted.has(reason)) {
     showError.counted.add(reason);
@@ -65,11 +66,14 @@ const originOf = (url) => {
     return "";
   }
 };
+// The first frame of ours in a stack: "app.js:2848" (Chrome's "at f (…/app.js?v=3:2848:9)", Safari's "f@…/app.js:2848:9").
+const whereFrom = (stack) => String(stack ?? "").match(/([\w.-]+\.m?js)(?:\?[^:\s)]*)?:(\d+)/)?.slice(1, 3).join(":") ?? "";
 window.addEventListener("error", (e) => {
   if (e.message === "Script error." || (e.filename && originOf(e.filename) !== location.origin)) return;
-  showError(e.message);
+  const file = e.filename?.split("/").at(-1).split("?")[0];
+  showError(e.message, whereFrom(e.error?.stack) || (file ? `${file}:${e.lineno}` : ""));
 });
-window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason)));
+window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason), whereFrom(e.reason?.stack)));
 window.reportError ??= (e) => showError(e?.message ?? String(e));
 const OSMD_URL = "lib/opensheetmusicdisplay@2.2.0/build/opensheetmusicdisplay.min.js"; // scripts/fetch-libs.sh
 const NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -1751,7 +1755,7 @@ async function shareScore(id, button, status, label) {
   }
 }
 
-$("share").onclick = () => shareScore(current.id, $("share"), $("share-status"));
+$("share").onclick = () => current && shareScore(current.id, $("share"), $("share-status"));
 
 // A link couldn't be made: the reason, with Try again and Send as a PDF
 // instead, until one is tapped (it doesn't fade like other share messages).
@@ -1833,7 +1837,7 @@ $("share-audio").onclick = async () => {
 };
 
 // The same link share as the icon by the title.
-$("share-score").onclick = () => shareScore(current.id, $("share-score"), $("panel-share-status"), SHARE_SCORE);
+$("share-score").onclick = () => current && shareScore(current.id, $("share-score"), $("panel-share-status"), SHARE_SCORE);
 
 // The score as a .partsong.pdf (pages, with the score inside): a copy to keep,
 // print or send that doesn't expire. Kept while unchanged if the share sheet
@@ -2845,8 +2849,8 @@ $("others").oninput = () => {
   updateLabels();
   applyMix();
 };
-$("others").onchange = () => updateEntry(current.id, { others: Number($("others").value) });
-// (Guarded: Firefox has sent the slider's events before any score was open.)
+// (Guarded: Firefox has sent the sliders' events before any score was open.)
+$("others").onchange = () => current && updateEntry(current.id, { others: Number($("others").value) });
 $("tempo").oninput = () => {
   updateLabels();
   player?.setTempo(Number($("tempo").value));
