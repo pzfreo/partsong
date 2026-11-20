@@ -918,11 +918,13 @@ async function trySample() {
   // The reader misses the forward repeat at the start of bar 14.
   scan.settings = { repeats: { 26: 14 }, sample: true };
   setPageStatus("Opening the sample…");
+  const mine = scan;
   try {
     const blob = await (await fetch("samples/tallis-if-ye-love-me.pdf")).blob();
+    if (mine !== scan) return; // another scan was opened meanwhile
     if (await addFiles([new File([blob], "If ye love me (sample).pdf", { type: "application/pdf" })])) setPageStatus("Tap Read music to read the sample.");
   } catch (e) {
-    setPageStatus(`Couldn't open the sample: ${e.message}`);
+    if (mine === scan) setPageStatus(`Couldn't open the sample: ${e.message}`);
   }
 }
 for (const b of document.querySelectorAll(".try-sample")) b.onclick = trySample;
@@ -1076,6 +1078,7 @@ async function addPage(image, from, mine) {
   if (mine !== scan) return false;
   const p = { blob, url: URL.createObjectURL(blob), from };
   scan.pages.push(p);
+  scan.done = false; // changed: Read music reads it
   $("no-music-send").hidden = true; // the pages have changed
   // One tile more, not the grid again: for a long PDF that built every page's
   // picture again for each page added.
@@ -1159,6 +1162,7 @@ async function rotatePage(p) {
   }
   if (s !== scan) return; // another scan was opened meanwhile
   // Turned, it's another picture: its music and its systems are found (and checked) again.
+  s.done = false;
   delete p.xml;
   delete p.layout;
   delete p.parts;
@@ -1205,6 +1209,7 @@ function pageTile(p, i) {
     URL.revokeObjectURL(p.url);
     forgetHints(scan, scan.pages.indexOf(p), true);
     scan.pages.splice(scan.pages.indexOf(p), 1);
+    scan.done = false;
     renderPages();
   };
   return li;
@@ -1573,7 +1578,7 @@ async function readScan() {
     $("read-step").hidden = true;
     $("read-hint").hidden = true;
     $("recognise").textContent = "Read music";
-    $("recognise").disabled = s.pages.length === 0;
+    $("recognise").disabled = s.adding > 0 || s.pages.length === 0;
     release();
   }
   const entry = scanEntry(s, false);
@@ -1582,8 +1587,13 @@ async function readScan() {
   // a problem report says what read the music.
   entry.readBy = { version: SHOWN_VERSION, device: deviceKind, browser: ua, at: Date.now() };
   saved = await db.put(entry).then(() => true, () => false);
+  // Another scan was opened while it was saved: the score is in the library,
+  // and that scan's screen and reader are left alone.
+  if (s !== scan) {
+    if ($("scan").hidden) renderLibrary();
+    return;
+  }
   if (!saved) setPageStatus("Read OK, but couldn't save it on this phone (storage full?).");
-  if (!saved) s.done = false; // Read music tries the save again
   // The reader isn't kept while the score is practised (its models and
   // working memory are hundreds of MB); the next read loads it from storage.
   resetWorker();
