@@ -615,6 +615,9 @@ function startWorker() {
       reject(err);
     };
   });
+  // A reader that can't start is reported by the read that waits for it
+  // (opening the scan screen starts it with nobody waiting: that showed its error raw).
+  workerReady.catch(() => {});
   worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, noGpu: lowMemory, ios: iDevice, threads: tunedThreads(), gpu: tunedGpu() });
 }
 
@@ -727,11 +730,14 @@ let readSeconds = null; // how long the last whole read took
 let rereading = false; // reading a saved score's photos again: keep the old music until done
 
 let scanSettings = {}; // settings to save with the scan (the sample's)
+let scanOpened = 0; // counts scans opened: files still being added when another opens aren't added to it
+let adding = 0; // addFiles calls under way: Read music waits for every page
 let scanResumes = 0; // launches that carried this scan on without progress (kept by readScan's save)
 
 function loadScan(images = [], xmls = [], id = null, created = null, title = "") {
   pages.forEach((p) => URL.revokeObjectURL(p.url));
   pages = images.map((blob, i) => ({ blob, url: URL.createObjectURL(blob), xml: xmls[i] ?? undefined }));
+  scanOpened++;
   scanId = id;
   scanCreated = created;
   scanSettings = {};
@@ -1060,18 +1066,20 @@ function keepAwake() {
   };
 }
 
-async function addPage(image, from = "photo") {
+// False (and nothing added) when another scan was opened meanwhile.
+async function addPage(image, from, scan) {
   // Our own copy: iOS can stop letting Safari read a picked photo later (e.g.
   // after the app was in the background), and an upright photo is kept as is.
   const copy = new Blob([await image.arrayBuffer()], { type: image.type });
   const blob = await uprightPhoto(copy);
+  if (scan !== scanOpened) return false;
   const p = { blob, url: URL.createObjectURL(blob), from };
   pages.push(p);
   $("no-music-send").hidden = true; // the pages have changed
   // One tile more, not the grid again: for a long PDF that built every page's
   // picture again for each page added.
   $("pages").append(pageTile(p, pages.length - 1));
-  $("recognise").disabled = false;
+  return true;
 }
 
 // Why a picked file can't be used, in words a user can act on.
@@ -1085,30 +1093,41 @@ async function unreadableReason(file) {
 }
 
 // from: "camera" (Take photo) or "photo" (picked); a PDF's pages are "PDF".
+// Read music waits until every page is in: tapped part-way through a PDF, it
+// saved (and, restarted, carried on with) only the pages added so far.
 async function addFiles(files, from = "photo") {
+  const scan = scanOpened;
   const problems = [];
-  for (const f of files) {
-    const name = f.name || "file";
-    if (await isPdf(f)) {
-      if (!$("scan-name").value.trim()) $("scan-name").value = name.replace(/\.pdf$/i, "");
+  adding++;
+  $("recognise").disabled = true;
+  try {
+    for (const f of files) {
+      const name = f.name || "file";
       try {
-        await pdfPages(f, async (blob, n, count) => {
-          setPageStatus(`Opening ${name}: page ${n} of ${count}`);
-          await addPage(blob, "PDF");
-        });
-      } catch (e) {
-        problems.push(`Couldn't open ${name}: ${e.message}`);
+        if (await isPdf(f)) {
+          if (!$("scan-name").value.trim()) $("scan-name").value = name.replace(/\.pdf$/i, "");
+          try {
+            await pdfPages(f, async (blob, n, count) => {
+              if (scan !== scanOpened) throw new Stopped();
+              setPageStatus(`Opening ${name}: page ${n} of ${count}`);
+              await addPage(blob, "PDF", scan);
+            });
+          } catch (e) {
+            if (!(e instanceof Stopped)) problems.push(`Couldn't open ${name}: ${e.message}`);
+          }
+        } else await addPage(f, from, scan);
+      } catch {
+        // (A file the browser can't read fails at the first look at it, PDF or not.)
+        problems.push(`Couldn't add ${name}: ${await unreadableReason(f).catch(() => "it couldn't be read")}.`);
       }
-      continue;
+      if (scan !== scanOpened) return false; // another scan is open now: the rest aren't its pages
     }
-    try {
-      await addPage(f, from);
-    } catch {
-      problems.push(`Couldn't add ${name}: ${await unreadableReason(f)}.`);
-    }
+    setPageStatus(problems.join("\n"));
+    return !problems.length;
+  } finally {
+    adding--;
+    if (scan === scanOpened) $("recognise").disabled = adding > 0 || !pages.length;
   }
-  setPageStatus(problems.join("\n"));
-  return !problems.length;
 }
 
 $("camera").onchange = (e) => {
@@ -1120,6 +1139,15 @@ $("gallery").onchange = (e) => {
   e.target.value = "";
 };
 
+// Page i's fixed systems are no longer its own (the page was turned), or the
+// page has gone (gone: the later pages' move up one).
+function forgetHints(i, gone) {
+  if (!scanSettings.systemHints) return;
+  const hints = {};
+  for (const [k, v] of Object.entries(scanSettings.systemHints)) if (+k !== i) hints[gone && +k > i ? +k - 1 : k] = v;
+  scanSettings.systemHints = hints;
+}
+
 async function rotatePage(p) {
   try {
     p.blob = await rotateBlob(p.blob, 90);
@@ -1127,7 +1155,13 @@ async function rotatePage(p) {
     setPageStatus(`Couldn't turn page ${pages.indexOf(p) + 1}: ${LOST_PICTURE}.`);
     return;
   }
+  // Turned, it's another picture: its music and its systems are found (and checked) again.
   delete p.xml;
+  delete p.layout;
+  delete p.parts;
+  delete p.classes;
+  forgetHints(pages.indexOf(p), false);
+  delete scanSettings.systemsChecked;
   URL.revokeObjectURL(p.url);
   p.url = URL.createObjectURL(p.blob);
   renderPages();
@@ -1153,7 +1187,7 @@ $("page-zoom-close").onclick = () => closeZoom();
 $("page-zoom-rotate").onclick = async () => {
   if (!zoomed || reading) return;
   await rotatePage(zoomed);
-  $("page-zoom-img").src = zoomed.url;
+  if (zoomed) $("page-zoom-img").src = zoomed.url; // (closed meanwhile: nothing to show)
 };
 
 function pageTile(p, i) {
@@ -1166,6 +1200,7 @@ function pageTile(p, i) {
   li.querySelector(".rotate").onclick = () => rotatePage(p);
   li.querySelector(".remove").onclick = () => {
     URL.revokeObjectURL(p.url);
+    forgetHints(pages.indexOf(p), true);
     pages.splice(pages.indexOf(p), 1);
     renderPages();
   };
@@ -1174,7 +1209,7 @@ function pageTile(p, i) {
 function renderPages() {
   $("no-music-send").hidden = true; // the pages have changed
   $("pages").replaceChildren(...pages.map(pageTile));
-  $("recognise").disabled = pages.length === 0;
+  $("recognise").disabled = adding > 0 || pages.length === 0;
 }
 
 // Apply EXIF rotation and cap the size. homr autocrops before resizing to
@@ -1444,11 +1479,7 @@ async function readScan() {
         track("read-skipped-page");
         URL.revokeObjectURL(pages[i].url);
         pages.splice(i, 1);
-        if (scanSettings.systemHints) {
-          const hints = {};
-          for (const [k, v] of Object.entries(scanSettings.systemHints)) if (+k !== i) hints[+k > i ? +k - 1 : k] = v;
-          scanSettings.systemHints = hints;
-        }
+        forgetHints(i, true);
         renderPages();
         i--;
         dropped = true;
@@ -1719,29 +1750,32 @@ async function shareScore(id, button, status, label) {
   const say = shareReporter(button, status, label);
   button.disabled = true;
   try {
-    if (prepared?.id !== id) {
+    // This share's own (`prepared` is whichever waits for its second tap:
+    // another score shared meanwhile once sent its link in this one's place).
+    let mine = prepared?.id === id ? prepared : null;
+    if (!mine) {
       const entry = liveEntry(await stored(id));
       const key = await shareKey(entry);
       // Unchanged since it was last shared: the same link, straight away.
       const kept = await reusableLink(entry, key);
-      if (kept) prepared = { id, link: kept, file: null, title: entry.title };
+      if (kept) mine = { id, link: kept, file: null, title: entry.title };
       else {
         say("busy", "Preparing to share…", "Preparing…");
-        prepared = { id, ...(await shareableScore(entry)), title: entry.title };
-        if (prepared.link) await rememberLink(id, { key, link: prepared.link, at: Date.now() });
+        mine = { id, ...(await shareableScore(entry)), title: entry.title };
+        if (mine.link) await rememberLink(id, { key, link: mine.link, at: Date.now() });
       }
     }
-    if (!prepared.link) {
+    if (!mine.link) {
       // No link: nothing is sent behind their back. Say why, and offer to try
       // again or to send the score as a PDF (which opens in Partsong too).
-      const failed = prepared;
-      prepared = null;
-      linkFailed(id, button, status, label, failed);
+      if (prepared === mine) prepared = null;
+      linkFailed(id, button, status, label, mine);
       return;
     }
-    const how = await shareLink(prepared.link, prepared.title);
+    const how = await shareLink(mine.link, mine.title);
     if (how === "shared" || how === "downloaded" || how === "copied") track("share");
-    if (how !== "retry") prepared = null;
+    if (how === "retry") prepared = mine; // kept for the tap that shares it
+    else if (prepared === mine) prepared = null;
     if (how === "retry") say("ready", "Ready to share: tap again.", "Ready to share");
     else if (how === "cancelled") say("idle", "");
     else if (how === "copied") say("done", "Name and link copied: paste them into a message.", "Link copied ✓");
@@ -1805,7 +1839,8 @@ function updateAudioButton(checkLink = true) {
   if (checkLink) updateShareReady();
 }
 $("share-audio").onclick = async () => {
-  if (!(await allowedToShare(current.id))) return;
+  const entry = current;
+  if (!entry || !(await allowedToShare(entry.id))) return;
   const button = $("share-audio");
   const say = shareReporter(button, null, SHARE_AUDIO);
   button.disabled = true;
@@ -1819,7 +1854,10 @@ $("share-audio").onclick = async () => {
       renderer.bpm = Number($("tempo").value);
       renderer.instrument = $("instrument").value;
       const name = `${current.title} - ${part}`.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
-      preparedAudio = { key, part, file: await audioFile(await renderer.render(wholeSegments(), AUDIO_RATE), name) };
+      const file = await audioFile(await renderer.render(wholeSegments(), AUDIO_RATE), name);
+      // Another score was opened while it was made: not that one's recording (it once went out under its title).
+      if (current !== entry) return;
+      preparedAudio = { key, part, file };
       button.classList.add("ready");
     }
     const how = await shareFile(preparedAudio.file, `${current.title} (${preparedAudio.part})`);
@@ -1844,7 +1882,7 @@ $("share-score").onclick = () => current && shareScore(current.id, $("share-scor
 // needs a fresh tap.
 let preparedPdf = null; // { key, file }
 $("export-pdf").onclick = async () => {
-  if (!(await allowedToShare(current.id))) return;
+  if (!current || !(await allowedToShare(current.id))) return;
   const button = $("export-pdf");
   const say = shareReporter(button, null, EXPORT_PDF);
   button.disabled = true;
@@ -3020,6 +3058,12 @@ $("read-again").onclick = () => {
 };
 
 $("delete").onclick = () => {
+  // Being read again (Read again, then opened from the library): the read's save would bring it back.
+  if (reading && current.id === scanId) {
+    $("delete").textContent = "Stop reading it first";
+    setTimeout(() => ($("delete").textContent = "Delete"), 3000);
+    return;
+  }
   if ($("delete").dataset.confirm !== "1") {
     $("delete").dataset.confirm = "1";
     $("delete").textContent = "Tap again to delete";

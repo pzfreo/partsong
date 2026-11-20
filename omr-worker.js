@@ -39,6 +39,7 @@ const MODEL_SIZES = {
 };
 const modelUrl = (name) => new URL("models/" + name, location.href).href;
 const pieceKey = (name, i) => `${modelUrl(name)}?piece=${i}`;
+class NoRoom extends Error {} // the browser wouldn't store a downloaded piece (storage full)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The reader's own WebAssembly (path + this version's ?v=…). A connection that
@@ -109,16 +110,18 @@ async function downloadModel(name) {
           if (got.whole) {
             if (got.whole.byteLength !== size) throw new Error("short read");
             await cache.put(modelUrl(name), new Response(got.whole)).catch((e) => {
-              throw new Error(`couldn't store it: ${e.name || e.message}`);
+              throw new NoRoom(e.name || e.message);
             });
             post({ type: "progress", stage: "download", name, loaded: size, total: MODELS_TOTAL_BYTES });
             return;
           }
           await cache.put(pieceKey(name, i), new Response(got.piece)).catch((e) => {
-            throw new Error(`couldn't store it: ${e.name || e.message}`);
+            throw new NoRoom(e.name || e.message);
           });
           break;
         } catch (e) {
+          // Not the connection: downloading it again wouldn't help.
+          if (e instanceof NoRoom) throw new Error(`the music reader couldn't be kept on this device (${e.message}). Free some storage space and try again`);
           if (attempt >= 8) {
             throw new Error(
               `the connection keeps dropping (${e.message}). What has downloaded is kept; try again on a better connection`,
@@ -426,16 +429,17 @@ async function rustDecoder() {
   rs.decoder_free(p, n);
   if (!model) throw new Error("the music reader couldn't load homr's decoder");
   const contextBytes = CONTEXT_POSITIONS * DECODER_DIM * 4;
-  decoderInstance = { rs, model, context: rs.decoder_alloc(contextBytes), out: rs.decoder_alloc(MAX_SEQ_LEN * 32) };
+  // Kept only once it's whole: one whose encoder failed to load was once used by the next read.
+  const d = { rs, model, context: rs.decoder_alloc(contextBytes), out: rs.decoder_alloc(MAX_SEQ_LEN * 32) };
   post({ type: "log", msg: `Loaded ${MODELS[2]} in homr-rs (${build}) in ${Math.round(performance.now() - t0)} ms` });
   if (exactEncoder) {
     const t1 = performance.now();
     let ep, en;
     await modelBytes(MODELS[1], false, (size) => ((ep = rs.decoder_alloc((en = size))), new Uint8Array(rs.memory.buffer, ep, en)));
-    decoderInstance.encoder = rs.encoder_load(ep, en);
+    d.encoder = rs.encoder_load(ep, en);
     rs.decoder_free(ep, en);
-    if (!decoderInstance.encoder) throw new Error("the music reader couldn't load homr's encoder");
-    decoderInstance.image = rs.decoder_alloc(IMAGE_VALUES * 4);
+    if (!d.encoder) throw new Error("the music reader couldn't load homr's encoder");
+    d.image = rs.decoder_alloc(IMAGE_VALUES * 4);
     post({ type: "log", msg: `Loaded ${MODELS[1]} in homr-rs (${build}, exact) in ${Math.round(performance.now() - t1)} ms` });
     // The same encoder on the GPU, with the same results: it tests itself
     // first and otherwise (or if a staff trips its checks) uses the CPU one.
@@ -443,9 +447,9 @@ async function rustDecoder() {
       const t2 = performance.now();
       try {
         const { EncoderGPU } = await import("./omr/encoder_gpu.mjs");
-        const gpu = await EncoderGPU.create({ exports: rs, encoder: decoderInstance.encoder });
+        const gpu = await EncoderGPU.create({ exports: rs, encoder: d.encoder });
         const st = gpu.status;
-        if (st.backend === "gpu") decoderInstance.gpu = gpu;
+        if (st.backend === "gpu") d.gpu = gpu;
         else gpu.destroy();
         post({
           type: "log",
@@ -458,7 +462,7 @@ async function rustDecoder() {
       }
     }
   }
-  return decoderInstance;
+  return (decoderInstance = d);
 }
 
 // One staff: per symbol its six tokens (rhythm, pitch, lift, position,

@@ -145,7 +145,9 @@ self.addEventListener("fetch", (e) => {
     // A versioned file (the app's scripts, the music reader) only from its own
     // version: another cached version once ran an old reader with a new app.
     const wait = Date.now() < slowUntil ? 0 : NETWORK_WAIT;
-    const slow = new Promise((r) => setTimeout(r, wait)).then(url.search ? exact : cached);
+    // (Other queries, ./?inbox and ./?open-file, are the page itself: they have
+    // no exact copy, and waited on a hanging network for good.)
+    const slow = new Promise((r) => setTimeout(r, wait)).then(/^\?v=\w+$/.test(url.search) ? exact : cached);
     e.respondWith(
       Promise.race([
         fresh.catch(cached),
