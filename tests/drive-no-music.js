@@ -39,6 +39,9 @@ const read = async () => {
 // Never read a score: counted, but not asked.
 await read();
 r.newcomerAsked = !$("no-music-send").hidden;
+// The same again: twice in a visit says they think it's music, so they're asked too.
+r.statusNewcomer = await read();
+r.newcomerAskedSecondTime = !$("no-music-send").hidden;
 // Has read two: asked. On a phone the card is below the bottom of the screen
 // (browser bars, bigger text): pushed down here the same way, from the top.
 localStorage.setItem("partsong-reads", "2");

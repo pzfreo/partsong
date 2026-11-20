@@ -621,7 +621,7 @@ function startWorker() {
           return reject(new Error(data.msg));
         }
         pending.delete(data.id);
-        data.type === "result" ? p.resolve("xml" in data ? data.xml : data) : p.reject(new Error(data.msg));
+        data.type === "result" ? p.resolve("xml" in data ? data.xml : data) : p.reject(Object.assign(new Error(data.msg), { seen: data.seen }));
       }
     };
     // A crashed worker (e.g. the phone ran out of memory) fails everything waiting
@@ -743,6 +743,7 @@ function setPageStatus(s) {
 // The scan being read is saved to the library page by page (pending: true),
 // so if Android pauses or kills the tab, reading resumes from the next page.
 let reading = false;
+let noMusicFails = 0; // "doesn't look like sheet music" this visit
 let readSeconds = null; // how long the last whole read took
 
 
@@ -890,13 +891,18 @@ function countRead() {
 // still find staves), e.g.
 // "read-no-music (iPhone v292): camera, 12 MP, 0 systems, reads before 0".
 // Never the picture: Send it to us lets the singer send it by email.
-function countNoMusic(p, message) {
+// e.seen: how much of the page the reader took for staff lines and noteheads
+// (see seen() in omr-worker.js). Sheet music is a few per cent staff lines: none
+// seen is a page that isn't music, or is too faint or sideways; plenty seen
+// and no staves made is the reader's own miss.
+const share = (pct) => (pct == null ? "?" : pct < 0.05 ? "0" : pct < 1 ? pct.toFixed(1) : String(Math.round(pct)));
+function countNoMusic(p, e) {
   try {
     // Sent at once: v293 decoded the photo again first to get its size, and
     // the count never arrived from a phone.
-    const systems = /No staffs/.test(message) ? 0 : (p?.layout?.length ?? 0);
+    const systems = /No staffs/.test(e.message) ? 0 : (p?.layout?.length ?? 0);
     const before = group(+(localStorage.getItem(READS) || 0), [1, 2, 3, 6]);
-    track(`read-no-music (${deviceTag}): ${p?.from ?? "saved"}, ${p?.mp ?? "?"} MP, ${systems} systems, reads before ${before}`);
+    track(`read-no-music (${deviceTag}): ${p?.from ?? "saved"}, ${p?.mp ?? "?"} MP ${p?.shape ?? "?"}, ${systems} systems, staff lines ${share(e.seen?.staff)}%, noteheads ${share(e.seen?.heads)}%, reads before ${before}`);
   } catch {}
 }
 
@@ -1236,6 +1242,7 @@ async function normalise(blob, page) {
   canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
   if (page) page.mp = Math.max(1, Math.round((canvas.width * canvas.height) / 1e6));
+  if (page) page.shape = canvas.width > canvas.height ? "landscape" : "portrait";
   const png = await canvas.convertToBlob({ type: "image/png" });
   canvas.width = canvas.height = 0; // its memory back now, not when collected (see pdf-pages.js)
   return png.arrayBuffer();
@@ -1557,10 +1564,15 @@ async function readScan() {
     const why = lines.length > 1 ? `${lines.at(-1)}\n\n${e.message}` : e.message;
     const page = s.pages.findIndex((p) => !p.xml) + 1;
     if (NO_MUSIC.test(e.message)) {
-      countNoMusic(s.pages[page - 1], e.message);
-      // Asked only of singers who have read a score before (so they know what
-      // a good photo is): their misses are the ones most likely the reader's.
-      $("no-music-send").hidden = !(+(localStorage.getItem(READS) || 0) > 0);
+      countNoMusic(s.pages[page - 1], e);
+      // Asked of singers who have read a score before (so they know what a
+      // good photo is: their misses are the ones most likely the reader's),
+      // and of anyone it happens to twice in a visit (trying again says they
+      // think it's music; first-time users were never asked, and never seen).
+      noMusicFails++;
+      let reads = 0;
+      try { reads = +(localStorage.getItem(READS) || 0); } catch {}
+      $("no-music-send").hidden = !(reads > 0 || noMusicFails >= 2);
       if (!$("no-music-send").hidden) {
         track("no-music-ask: shown");
         // Below the message, often off the bottom of a phone screen: brought up.
@@ -1569,7 +1581,7 @@ async function readScan() {
     }
     setPageStatus(
       NO_MUSIC.test(e.message)
-        ? `Page ${page} doesn't look like sheet music.\nRetake the photo straight on, in good light, or remove it (×) and press Read music again.`
+        ? `Page ${page} doesn't look like sheet music.\nIf it's sideways, tap ↻ on it to turn it. Otherwise retake the photo straight on, in good light, or remove it (×) and press Read music again.`
         : outOfMemory
           ? `Couldn't read page ${page}: there wasn't enough memory.\nClose other apps and browser tabs, then tap Read music to carry on from this page.`
           : `Couldn't read page ${page}: ${why}`,

@@ -577,12 +577,28 @@ async function openPage(page, systemsJson, packed) {
   let classes = packed ? await squeeze(packed, "deflate", DecompressionStream) : null;
   if (classes?.length !== tiles * WIN * WIN) classes = await segment(rs, tiles);
   lap("segnet");
+  lastSeen = seen(classes);
+  post({ type: "log", msg: `Seen on the page: staff lines ${lastSeen.staff.toFixed(1)}%, noteheads ${lastSeen.heads.toFixed(1)}%` });
   const cp = copyIn(classes);
   const segmented = rs.page_segment(cp);
   rs.dealloc(cp, classes.byteLength); // also when the page has no music (it throws below)
   if (segmented !== 0) throw new Error(message());
   lap("segment");
   return { rs, mem, copyIn, message, classes, ms };
+}
+
+// What segnet made of the last page opened: the share of it (per cent) it took
+// for staff lines and for noteheads (homr's classes 4 and 2). Sent with an
+// error, so "no music found" says whether none was seen (not music, or too
+// faint) or it was seen and not made into staves (ours to fix). Never the page.
+let lastSeen = null;
+function seen(classes) {
+  let staff = 0, heads = 0;
+  for (let i = 0; i < classes.length; i++) {
+    if (classes[i] === 4) staff++;
+    else if (classes[i] === 2) heads++;
+  }
+  return { staff: (100 * staff) / classes.length, heads: (100 * heads) / classes.length };
 }
 
 // Segmentation, a batch of tiles at a time; each tile's class map is the
@@ -712,6 +728,7 @@ async function init(noGpu, exact) {
 
 let ready;
 self.onmessage = async ({ data }) => {
+  lastSeen = null;
   try {
     if (data.type === "init") {
       if (typeof data.ios === "boolean") IOS = data.ios;
@@ -764,6 +781,6 @@ self.onmessage = async ({ data }) => {
     }
   } catch (e) {
     if (e instanceof WebAssembly.RuntimeError) pageReader = null;
-    post({ type: "error", id: data.id, msg: String(e && e.message ? e.message : e) });
+    post({ type: "error", id: data.id, msg: String(e && e.message ? e.message : e), seen: lastSeen });
   }
 };
