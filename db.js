@@ -103,7 +103,7 @@ function fromStored(entry) {
 }
 
 export async function all() {
-  return (await run("readonly", (store) => store.getAll())).map(fromStored);
+  return (await run("readonly", (store) => store.getAll())).filter(Boolean).map(fromStored);
 }
 
 // The library as a list: what a row shows, not the scores themselves. Walks
@@ -119,6 +119,13 @@ export async function list(thumbs = false) {
       const c = req.result;
       if (!c) return;
       const e = c.value;
+      // A score can come back empty (seen on Windows, Chrome: "Cannot read
+      // properties of null"; it gives null when a large record's file has gone
+      // from the disk). Left out, and counted in .empty, so the rest still show.
+      if (!e) {
+        out.empty = (out.empty ?? 0) + 1;
+        return c.continue();
+      }
       const first = thumbs ? e.images?.[0] : null;
       out.push({
         id: e.id,

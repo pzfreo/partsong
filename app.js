@@ -479,6 +479,11 @@ async function renderLibrary() {
   } catch (e) {
     $("library-status").textContent = `Couldn't open your scores (${e?.message || e?.name || "storage error"}). Close Partsong and open it again.`;
   }
+  // Scores that came back empty from storage (see db.list): counted once a visit.
+  if (lib.empty && !renderLibrary.counted) {
+    renderLibrary.counted = true;
+    track(`library: empty record (${deviceTag})`);
+  }
   $("library-search").hidden = lib.length < SEARCH_FROM;
   if (lib.length < SEARCH_FROM) $("library-search").value = "";
   releasePhotos("library");
