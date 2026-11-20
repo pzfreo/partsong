@@ -12,6 +12,12 @@ compatibility_date = "2026-10-01"
 binding = "SHARES"
 bucket_name = "partsong-shares"
 
+# The problem log (schema.sql). The id is the database's, from `wrangler d1 create`.
+[[d1_databases]]
+binding = "LOG"
+database_name = "partsong-log"
+database_id = "TO-BE-CREATED"
+
 [vars]
 # The app, and the test site (partsong-test.vercel.app), whose Send link
 # otherwise always falls back to a PDF.

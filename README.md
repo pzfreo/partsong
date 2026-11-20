@@ -81,6 +81,13 @@ then *Add to Home screen*.
   with OpenSheetMusicDisplay (to spot recognition errors). Both follow along
   (bar highlight + playhead; the note marker and marking are on Pages) and take
   a tap on a bar as the start. Imported MusicXML opens on As read.
+- **Problem log** (`report()` in `app.js`, `relay/`): an uncaught error, a
+  failed read and a read the phone interrupted each send one record to the
+  relay's `POST /log`, kept in a D1 database (`relay/schema.sql`) for 90 days:
+  the error and its stack, what was happening, the device, and the music
+  reader's last messages; never a score, its name or a page. The first of each
+  problem in a visit, 20 at most. Read it with `scripts/problem-log.sh`
+  (`tests/drive-problem-log.js` needs `wrangler dev`, see its header).
 - **Share by link** (`share.js`, `relay/`): sharing uploads the score's PDF,
   encrypted on the phone (AES-GCM), to a Cloudflare Worker + R2 relay, and
   shares just the link `https://partsong.app/#s=<id>.<key>` (WhatsApp drops a

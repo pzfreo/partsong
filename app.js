@@ -4,7 +4,7 @@ import { AUDIO_RATE, audioFile } from "./audio.js";
 import * as db from "./db.js";
 import { rotateBlob, uprightPhoto } from "./orient.js";
 import { isPdf, pdfPages } from "./pdf-pages.js";
-import { entryFromLink, entryFromRelay, isMobile, LINK_REUSE_MS, parseScoreFile, readScoreFile, scoreFile, shareableScore, shareFile, shareKey, shareLink } from "./share.js";
+import { entryFromLink, entryFromRelay, isMobile, LINK_REUSE_MS, parseScoreFile, readScoreFile, scoreFile, shareableScore, relayUrl, shareFile, shareKey, shareLink } from "./share.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,8 +40,9 @@ const deviceKind = /iPhone|iPod/.test(ua) ? "iPhone" : iDevice ? "iPad" : /Andro
 const deviceTag = `${deviceKind} ${SHOWN_VERSION}`;
 
 // where: the file and line it was thrown from, for uncaught errors ("app.js:2848").
-function showError(message, where = "") {
+function showError(message, where = "", stack = "") {
   remember(recentErrors, message, 10);
+  report("error", message, { place: stack || where });
   // Counted once per kind of error a visit, as "error (Android): …".
   const reason = failureReason(message) + (where && ` @ ${where}`);
   showError.counted ??= new Set();
@@ -71,9 +72,9 @@ const whereFrom = (stack) => String(stack ?? "").match(/([\w.-]+\.m?js)(?:\?[^:\
 window.addEventListener("error", (e) => {
   if (e.message === "Script error." || (e.filename && originOf(e.filename) !== location.origin)) return;
   const file = e.filename?.split("/").at(-1).split("?")[0];
-  showError(e.message, whereFrom(e.error?.stack) || (file ? `${file}:${e.lineno}` : ""));
+  showError(e.message, whereFrom(e.error?.stack) || (file ? `${file}:${e.lineno}` : ""), e.error?.stack);
 });
-window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason), whereFrom(e.reason?.stack)));
+window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason), whereFrom(e.reason?.stack), e.reason?.stack));
 window.reportError ??= (e) => showError(e?.message ?? String(e));
 const OSMD_URL = "lib/opensheetmusicdisplay@2.2.0/build/opensheetmusicdisplay.min.js"; // scripts/fetch-libs.sh
 const NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -831,6 +832,39 @@ function checkDevice() {
 // features get used, never titles or music. Silent if blocked or offline.
 // GoatCounter's script loads after the app starts (and not at all if
 // blocked): an early count waits up to 15 s for it.
+// ---------- the problem log ----------
+// What went wrong, sent to the link service's log (relay/index.js, POST /log)
+// so a failure can be understood, not only counted: the error and where in
+// the code, what was happening, the device, and the music reader's last
+// messages. Never a score, its name or a page. The first of each problem in a
+// visit, and 20 at most: something failing in a loop sends one.
+const VISIT = crypto.randomUUID().slice(0, 13); // new each time the app opens, kept nowhere: ties a visit's records together
+const reported = new Set();
+// more: { stage, place (a stack), detail (an object of facts) }
+function report(kind, message, more = {}) {
+  try {
+    // (Tests run on localhost: only to a relay of their own.)
+    if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !localStorage.getItem("partsong.relay")) return;
+    const key = `${kind}: ${message}`;
+    if (reported.has(key) || reported.size >= 20) return;
+    reported.add(key);
+    const body = JSON.stringify({
+      visit: VISIT,
+      kind,
+      version: SHOWN_VERSION,
+      device: deviceKind,
+      browser: ua,
+      stage: more.stage ?? screens.find((s) => !$(s).hidden) ?? "",
+      message: String(message).slice(0, 2000),
+      place: more.place ? String(more.place).slice(0, 2000) : undefined,
+      detail: { lowMemory, isolated: self.crossOriginIsolated, cores: navigator.hardwareConcurrency, memoryGB: navigator.deviceMemory, ...more.detail },
+      reader: readerLog.slice(-20).join("\n"),
+    });
+    // (A string body is text/plain: a "simple" request, with no preflight.)
+    fetch(relayUrl() + "/log", { method: "POST", body, keepalive: true }).catch(() => {});
+  } catch {}
+}
+
 function track(name, title = name, tries = 30) {
   try {
     if (window.goatcounter?.count) return window.goatcounter.count({ path: name, title, event: true });
@@ -1018,6 +1052,7 @@ async function resumeUnfinished() {
   try { hidden = localStorage.getItem(READ_HIDDEN) === "1"; } catch {}
   const where = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
   const at = `${where}, ${hidden ? "in the background" : "on screen"}`;
+  report(resumes === 2 ? "read-gave-up" : "read-restarted", at, { stage: where, detail: { resumes, pages: n, background: hidden } });
   if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
   track(`read-restarted (${deviceTag}): ${at}`);
   lowMemory = true;
@@ -1541,7 +1576,15 @@ async function readScan() {
     // executed" in Safari, "Out of memory"): carry on from here in low memory,
     // as after a closed page. Already in low memory: say so plainly.
     const outOfMemory = OUT_OF_MEMORY.test(e.message);
+    // For the problem log: where the read was, and the page it was on.
+    const at = s.pages.findIndex((p) => !p.xml);
+    const facts = {
+      stage: `${s.settings.systemsChecked ? "reading the notes" : "finding systems"}, page ${at + 1} of ${s.pages.length}`,
+      place: e.stack,
+      detail: { from: s.pages[at]?.from ?? "saved", mp: s.pages[at]?.mp, shape: s.pages[at]?.shape, seen: e.seen, rereading: s.rereading },
+    };
     if (outOfMemory && !lowMemory) {
+      report("read-out-of-memory", e.message, facts);
       track(`read-out-of-memory (${deviceTag}): carried on in low memory`);
       lowMemory = true;
       resetWorker();
@@ -1554,6 +1597,7 @@ async function readScan() {
     if (saved) await db.update(s.id, { stopped: true }).catch(() => {});
     // onnxruntime that didn't start won't in this reader: the next read gets a new one.
     if (/no available backend found|initWasm/.test(e.message)) resetWorker();
+    report(NO_MUSIC.test(e.message) ? "no-music" : "read-failed", e.message, facts);
     track("read-failed");
     track(`read-failed (${deviceTag})`);
     track(`read-failed (${deviceTag}): ${failureReason(e)}${lowMemory ? " (low memory)" : ""}`);

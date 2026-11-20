@@ -166,7 +166,7 @@ const RELAY_MAGIC = "PSR1";
 const RELAY_WAIT = 60000; // ms before an upload or fetch counts as failed (at least)
 const RELAY_MAX = 40e6; // the relay's limit (relay/index.js)
 const SLOW_LINK = 50e3; // bytes/s: a big score's upload gets as long as this rate needs
-const relayUrl = () => {
+export const relayUrl = () => {
   try {
     const own = localStorage.getItem("partsong.relay"); // tests point this at a local relay
     if (own) return own;
