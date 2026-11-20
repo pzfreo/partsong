@@ -181,7 +181,7 @@ function diagnostics() {
       `Parts: ${score.lines.map((l) => l.label).join(", ")}`,
     );
   }
-  if (screen === "scan") lines.push(`Scan: ${pages.length} pages · status: ${$("status").textContent.replace(/\n/g, " | ")}`);
+  if (screen === "scan") lines.push(`Scan: ${scan.pages.length} pages · status: ${$("status").textContent.replace(/\n/g, " | ")}`);
   if (recentErrors.length) lines.push("", "Recent errors:", ...recentErrors);
   const setup = [...(tunedResult() ? [`Tuned encoder (saved): ${tunedResult()}`] : []), ...readerSetup];
   if (setup.length) lines.push("", "Music reader setup:", ...setup);
@@ -191,7 +191,7 @@ function diagnostics() {
 
 // After "doesn't look like sheet music", asked (Send it to us): the report carries the
 // pages (up to 3), so we can see whether the reader missed real music.
-const reportPages = () => (!$("scan").hidden && !$("no-music-send").hidden ? pages.filter((p) => !p.xml).slice(0, 3) : []);
+const reportPages = () => (!$("scan").hidden && !$("no-music-send").hidden ? scan.pages.filter((p) => !p.xml).slice(0, 3) : []);
 const NO_MUSIC_REPORT = "Partsong said this isn't sheet music, but it is.";
 function openReport(e) {
   $("report-diag").textContent = diagnostics();
@@ -538,7 +538,7 @@ async function renderLibrary() {
         del.title = entry.locked ? "Locked: unlock it to delete" : "Delete";
         del.innerHTML = DELETE_ICON;
         // Locked scores can't be deleted, nor the scan being read right now.
-        del.disabled = !!entry.locked || (reading && entry.id === scanId);
+        del.disabled = !!entry.locked || (reading && entry.id === scan.id);
         del.onclick = () => confirmDelete(li, entry);
         li.append(del);
         return li;
@@ -549,7 +549,21 @@ async function renderLibrary() {
 
 // ---------- scanning ----------
 
-let pages = []; // { blob, url }
+// One scan's state, replaced whole when another scan opens: work still running
+// for the old one (files being added, a page being turned, a read being saved)
+// holds the old object, so it can't touch the new scan.
+// pages: { blob, url, from, mp, xml (once read), layout, parts, classes (its systems, once found) }
+const newScan = (images = [], xmls = [], id = null, created = null) => ({
+  pages: images.map((blob, i) => ({ blob, url: URL.createObjectURL(blob), xml: xmls[i] ?? undefined })),
+  id,
+  created,
+  settings: {}, // saved with the scan (the sample's repeats, systems you fixed)
+  resumes: 0, // launches that carried this scan on without progress (kept by readScan's save)
+  rereading: false, // reading a saved score's photos again: keep the old music until done
+  adding: 0, // addFiles calls under way: Read music waits for every page
+  done: false, // read, and being saved or saved
+});
+let scan = newScan();
 let worker;
 let workerReady;
 const pending = new Map();
@@ -723,26 +737,13 @@ function setPageStatus(s) {
 
 // The scan being read is saved to the library page by page (pending: true),
 // so if Android pauses or kills the tab, reading resumes from the next page.
-let scanId = null;
-let scanCreated = null;
 let reading = false;
 let readSeconds = null; // how long the last whole read took
-let rereading = false; // reading a saved score's photos again: keep the old music until done
 
-let scanSettings = {}; // settings to save with the scan (the sample's)
-let scanOpened = 0; // counts scans opened: files still being added when another opens aren't added to it
-let adding = 0; // addFiles calls under way: Read music waits for every page
-let scanResumes = 0; // launches that carried this scan on without progress (kept by readScan's save)
 
 function loadScan(images = [], xmls = [], id = null, created = null, title = "") {
-  pages.forEach((p) => URL.revokeObjectURL(p.url));
-  pages = images.map((blob, i) => ({ blob, url: URL.createObjectURL(blob), xml: xmls[i] ?? undefined }));
-  scanOpened++;
-  scanId = id;
-  scanCreated = created;
-  scanSettings = {};
-  scanResumes = 0;
-  rereading = false;
+  scan.pages.forEach((p) => URL.revokeObjectURL(p.url));
+  scan = newScan(images, xmls, id, created);
   pageStatus = "";
   $("scan-name").value = title;
   renderPages();
@@ -915,7 +916,7 @@ async function trySample() {
   loadScan();
   $("scan-name").value = "If ye love me (sample)";
   // The reader misses the forward repeat at the start of bar 14.
-  scanSettings = { repeats: { 26: 14 }, sample: true };
+  scan.settings = { repeats: { 26: 14 }, sample: true };
   setPageStatus("Opening the sample…");
   try {
     const blob = await (await fetch("samples/tallis-if-ye-love-me.pdf")).blob();
@@ -931,14 +932,14 @@ function resumeScan(entry) {
   loadScan(entry.images, entry.pages, entry.id, entry.created, entry.title);
   // Settings made before reading (the sample's repeats, systems you fixed) go on with it.
   const { id: _id, created: _c, title: _t, images: _i, pages: _p, pending: _pe, stopped: _s, resumes: _r, found, ...settings } = entry;
-  scanSettings = settings;
+  scan.settings = settings;
   found?.forEach((f, i) => {
-    if (!f || !pages[i]) return;
-    pages[i].layout = f.systems;
-    pages[i].parts = f.parts;
-    pages[i].classes = f.classes;
+    if (!f || !scan.pages[i]) return;
+    scan.pages[i].layout = f.systems;
+    scan.pages[i].parts = f.parts;
+    scan.pages[i].classes = f.classes;
   });
-  scanResumes = entry.resumes ?? 0;
+  scan.resumes = entry.resumes ?? 0;
   readScan();
 }
 
@@ -953,7 +954,7 @@ function reloadForThreads() {
     // (more threads use more), and a reload would cut a download short.
     if (iDevice || deviceKind === "Android" || self.crossOriginIsolated || !navigator.serviceWorker?.controller || (navigator.hardwareConcurrency || 1) < 2) return false;
     if (sessionStorage.getItem(THREADS_RELOAD)) return false; // tried in this tab
-    sessionStorage.setItem(THREADS_RELOAD, `scan:${scanId}`);
+    sessionStorage.setItem(THREADS_RELOAD, `scan:${scan.id}`);
   } catch {
     return false;
   }
@@ -1015,26 +1016,26 @@ async function resumeUnfinished() {
 // scan so that a read carried on after the app was closed starts where it
 // stopped (finding systems for a long score takes a while, and a phone may
 // close the app more than once on the way).
-const foundLayouts = () => pages.map((p) => (p.layout ? { systems: p.layout, parts: p.parts, classes: p.classes ?? null } : null));
+const foundLayouts = (s) => s.pages.map((p) => (p.layout ? { systems: p.layout, parts: p.parts, classes: p.classes ?? null } : null));
 
-function scanEntry(pending) {
+function scanEntry(s, pending) {
   return {
-    id: scanId,
+    id: s.id,
     title: $("scan-name").value.trim() || `Scan ${new Date().toLocaleDateString()}`,
-    created: scanCreated,
-    images: pages.map((p) => p.blob),
-    pages: pages.map((p) => p.xml ?? null),
+    created: s.created,
+    images: s.pages.map((p) => p.blob),
+    pages: s.pages.map((p) => p.xml ?? null),
     pending,
-    resumes: scanResumes,
-    ...scanSettings,
-    ...(pending ? { found: foundLayouts() } : {}),
+    resumes: s.resumes,
+    ...s.settings,
+    ...(pending ? { found: foundLayouts(s) } : {}),
   };
 }
 
 $("discard-scan").onclick = async () => {
   if (reading) return;
-  if (rereading) return goHome(); // the score is still saved as it was
-  if (scanId) await db.remove(scanId).catch(() => {});
+  if (scan.rereading) return goHome(); // the score is still saved as it was
+  if (scan.id) await db.remove(scan.id).catch(() => {});
   loadScan();
   goHome();
 };
@@ -1067,18 +1068,18 @@ function keepAwake() {
 }
 
 // False (and nothing added) when another scan was opened meanwhile.
-async function addPage(image, from, scan) {
+async function addPage(image, from, mine) {
   // Our own copy: iOS can stop letting Safari read a picked photo later (e.g.
   // after the app was in the background), and an upright photo is kept as is.
   const copy = new Blob([await image.arrayBuffer()], { type: image.type });
   const blob = await uprightPhoto(copy);
-  if (scan !== scanOpened) return false;
+  if (mine !== scan) return false;
   const p = { blob, url: URL.createObjectURL(blob), from };
-  pages.push(p);
+  scan.pages.push(p);
   $("no-music-send").hidden = true; // the pages have changed
   // One tile more, not the grid again: for a long PDF that built every page's
   // picture again for each page added.
-  $("pages").append(pageTile(p, pages.length - 1));
+  $("pages").append(pageTile(p, scan.pages.length - 1));
   return true;
 }
 
@@ -1096,9 +1097,9 @@ async function unreadableReason(file) {
 // Read music waits until every page is in: tapped part-way through a PDF, it
 // saved (and, restarted, carried on with) only the pages added so far.
 async function addFiles(files, from = "photo") {
-  const scan = scanOpened;
+  const mine = scan;
   const problems = [];
-  adding++;
+  mine.adding++;
   $("recognise").disabled = true;
   try {
     for (const f of files) {
@@ -1108,25 +1109,25 @@ async function addFiles(files, from = "photo") {
           if (!$("scan-name").value.trim()) $("scan-name").value = name.replace(/\.pdf$/i, "");
           try {
             await pdfPages(f, async (blob, n, count) => {
-              if (scan !== scanOpened) throw new Stopped();
+              if (mine !== scan) throw new Stopped();
               setPageStatus(`Opening ${name}: page ${n} of ${count}`);
-              await addPage(blob, "PDF", scan);
+              await addPage(blob, "PDF", mine);
             });
           } catch (e) {
             if (!(e instanceof Stopped)) problems.push(`Couldn't open ${name}: ${e.message}`);
           }
-        } else await addPage(f, from, scan);
+        } else await addPage(f, from, mine);
       } catch {
         // (A file the browser can't read fails at the first look at it, PDF or not.)
         problems.push(`Couldn't add ${name}: ${await unreadableReason(f).catch(() => "it couldn't be read")}.`);
       }
-      if (scan !== scanOpened) return false; // another scan is open now: the rest aren't its pages
+      if (mine !== scan) return false; // another scan is open now: the rest aren't its pages
     }
     setPageStatus(problems.join("\n"));
     return !problems.length;
   } finally {
-    adding--;
-    if (scan === scanOpened) $("recognise").disabled = adding > 0 || !pages.length;
+    mine.adding--;
+    if (mine === scan) $("recognise").disabled = scan.adding > 0 || !scan.pages.length;
   }
 }
 
@@ -1141,27 +1142,29 @@ $("gallery").onchange = (e) => {
 
 // Page i's fixed systems are no longer its own (the page was turned), or the
 // page has gone (gone: the later pages' move up one).
-function forgetHints(i, gone) {
-  if (!scanSettings.systemHints) return;
+function forgetHints(s, i, gone) {
+  if (!s.settings.systemHints) return;
   const hints = {};
-  for (const [k, v] of Object.entries(scanSettings.systemHints)) if (+k !== i) hints[gone && +k > i ? +k - 1 : k] = v;
-  scanSettings.systemHints = hints;
+  for (const [k, v] of Object.entries(s.settings.systemHints)) if (+k !== i) hints[gone && +k > i ? +k - 1 : k] = v;
+  s.settings.systemHints = hints;
 }
 
 async function rotatePage(p) {
+  const s = scan;
   try {
     p.blob = await rotateBlob(p.blob, 90);
   } catch {
-    setPageStatus(`Couldn't turn page ${pages.indexOf(p) + 1}: ${LOST_PICTURE}.`);
+    if (s === scan) setPageStatus(`Couldn't turn page ${s.pages.indexOf(p) + 1}: ${LOST_PICTURE}.`);
     return;
   }
+  if (s !== scan) return; // another scan was opened meanwhile
   // Turned, it's another picture: its music and its systems are found (and checked) again.
   delete p.xml;
   delete p.layout;
   delete p.parts;
   delete p.classes;
-  forgetHints(pages.indexOf(p), false);
-  delete scanSettings.systemsChecked;
+  forgetHints(s, s.pages.indexOf(p), false);
+  delete s.settings.systemsChecked;
   URL.revokeObjectURL(p.url);
   p.url = URL.createObjectURL(p.blob);
   renderPages();
@@ -1173,7 +1176,7 @@ let zoomed = null;
 function openZoom(p) {
   zoomed = p;
   $("page-zoom-img").src = p.url;
-  $("page-zoom-num").textContent = `Page ${pages.indexOf(p) + 1} of ${pages.length}`;
+  $("page-zoom-num").textContent = `Page ${scan.pages.indexOf(p) + 1} of ${scan.pages.length}`;
   $("page-zoom").hidden = false;
   history.pushState({ ...history.state, zoom: true }, "");
 }
@@ -1200,16 +1203,16 @@ function pageTile(p, i) {
   li.querySelector(".rotate").onclick = () => rotatePage(p);
   li.querySelector(".remove").onclick = () => {
     URL.revokeObjectURL(p.url);
-    forgetHints(pages.indexOf(p), true);
-    pages.splice(pages.indexOf(p), 1);
+    forgetHints(scan, scan.pages.indexOf(p), true);
+    scan.pages.splice(scan.pages.indexOf(p), 1);
     renderPages();
   };
   return li;
 }
 function renderPages() {
   $("no-music-send").hidden = true; // the pages have changed
-  $("pages").replaceChildren(...pages.map(pageTile));
-  $("recognise").disabled = adding > 0 || pages.length === 0;
+  $("pages").replaceChildren(...scan.pages.map(pageTile));
+  $("recognise").disabled = scan.adding > 0 || scan.pages.length === 0;
 }
 
 // Apply EXIF rotation and cap the size. homr autocrops before resizing to
@@ -1276,58 +1279,58 @@ const OUT_OF_MEMORY = /out of memory|unreachable/i;
 // systems does), and the staves are read once you tap Read music.
 
 // Pages (indexes) whose systems give other parts than most pages' do.
-function doubtfulPages(todo) {
-  const shape = (i) => pages[i].parts?.join(",");
+function doubtfulPages(s, todo) {
+  const shape = (i) => s.pages[i].parts?.join(",");
   const freq = new Map();
   for (const i of todo) if (shape(i)) freq.set(shape(i), (freq.get(shape(i)) ?? 0) + 1);
   const usual = [...freq].sort((a, b) => b[1] - a[1])[0]?.[0];
   return todo.filter((i) => shape(i) && shape(i) !== usual);
 }
 
-async function checkSystems(stopped) {
-  const todo = pages.map((_, i) => i).filter((i) => !pages[i].xml);
+async function checkSystems(s, stopped) {
+  const todo = s.pages.map((_, i) => i).filter((i) => !s.pages[i].xml);
   // Each page is shown to check as soon as its systems are found, so you
   // check page 1 while the rest are found; Read music waits for the last.
   let check = null;
   try {
     for (const i of todo) {
       // Progress is on the status line until the check opens, then on its bar.
-      pageLabel = check ? "" : `Page ${i + 1} of ${pages.length}`;
+      pageLabel = check ? "" : `Page ${i + 1} of ${s.pages.length}`;
       if (!check) setPageStatus("finding lines of music…");
-      check?.waiting(`Finding systems: page ${i + 1} of ${pages.length}…`);
+      check?.waiting(`Finding systems: page ${i + 1} of ${s.pages.length}…`);
       // A page whose systems were found before the app was closed (a phone
       // reloading under memory pressure) isn't done again.
-      if (!pages[i].layout) {
+      if (!s.pages[i].layout) {
         try {
-          const r = await Promise.race([layoutPage(await pagePixels(pages[i].blob, pages[i]), scanSettings.systemHints?.[i]), stopped]);
-          pages[i].layout = r.systems;
-          pages[i].parts = r.parts;
-          pages[i].classes = r.classes;
-          if (scanId && !rereading) await db.update(scanId, { found: foundLayouts(), resumes: 0 }).catch(() => {});
-          scanResumes = 0; // progress
+          const r = await Promise.race([layoutPage(await pagePixels(s.pages[i].blob, s.pages[i]), s.settings.systemHints?.[i]), stopped]);
+          s.pages[i].layout = r.systems;
+          s.pages[i].parts = r.parts;
+          s.pages[i].classes = r.classes;
+          if (s.id && !s.rereading) await db.update(s.id, { found: foundLayouts(s), resumes: 0 }).catch(() => {});
+          s.resumes = 0; // progress
         } catch (e) {
           // No music on it: the reading leaves it out.
           if (e instanceof Stopped || !NO_MUSIC.test(e.message)) throw e;
         }
       }
-      if (pages[i].layout) {
+      if (s.pages[i].layout) {
         if (!check) {
           pageLabel = "";
           setPageStatus("");
-          check = openCheck();
+          check = openCheck(s);
         }
         check.add(i);
       }
     }
     pageLabel = "";
-    const found = `Systems (staves in each): ${todo.map((i) => `p${i + 1} ${(pages[i].layout ?? []).map((sys) => sys.length).join(",") || "none"} parts ${pages[i].parts?.join("") ?? "-"}`).join("; ")}`;
+    const found = `Systems (staves in each): ${todo.map((i) => `p${i + 1} ${(s.pages[i].layout ?? []).map((sys) => sys.length).join(",") || "none"} parts ${s.pages[i].parts?.join("") ?? "-"}`).join("; ")}`;
     console.log("[omr]", found);
     remember(readerLog, found, 40);
     if (check) {
-      const hints = await Promise.race([check.done(doubtfulPages(todo)), stopped]);
+      const hints = await Promise.race([check.done(doubtfulPages(s, todo)), stopped]);
       if (Object.keys(hints).length) {
         track("systems-check-fixed");
-        scanSettings.systemHints = { ...(scanSettings.systemHints ?? {}), ...hints };
+        s.settings.systemHints = { ...(s.settings.systemHints ?? {}), ...hints };
       }
     }
   } finally {
@@ -1336,9 +1339,9 @@ async function checkSystems(stopped) {
     $("recognise").hidden = false;
     $("check-list").replaceChildren(); // its full-size page pictures aren't kept
   }
-  scanSettings.systemsChecked = true;
+  s.settings.systemsChecked = true;
   // Reading again: the saved score stays as it was until the new reading is saved.
-  if (scanId && !rereading) await db.update(scanId, { systemHints: scanSettings.systemHints, systemsChecked: true }).catch(() => {});
+  if (s.id && !s.rereading) await db.update(s.id, { systemHints: s.settings.systemHints, systemsChecked: true }).catch(() => {});
 }
 
 // The check screen: pages are added as their systems are found; done()
@@ -1347,7 +1350,7 @@ async function checkSystems(stopped) {
 $("check-stop").onclick = () => $("recognise").click();
 const CHECK_LINES = "Each red line marks where one line of music (system) ends: all the voices sung together. If a red line is in the wrong place, tap between two staves to add or remove one.";
 const CHECK_INTRO = `Pages appear as they're found. ${CHECK_LINES}`;
-function openCheck() {
+function openCheck(s) {
   const drafts = {};
   let finished = false; // every page's systems found
   const labels = {};
@@ -1373,12 +1376,12 @@ function openCheck() {
       const div = Object.assign(document.createElement("div"), { className: "page" });
       const img = document.createElement("img");
       img.alt = `Page ${i + 1}`;
-      img.src = pages[i].url;
+      img.src = s.pages[i].url;
       const svg = document.createElementNS(SVG, "svg");
       svg.setAttribute("preserveAspectRatio", "none");
       const g = document.createElementNS(SVG, "g");
       svg.append(g);
-      const d = (drafts[i] = pageRows(i, pages[i].layout.map((staves, index) => ({ index, staves: staves.map(([, y0, , y1]) => ({ y0, y1 })) }))));
+      const d = (drafts[i] = pageRows(i, s.pages[i].layout.map((staves, index) => ({ index, staves: staves.map(([, y0, , y1]) => ({ y0, y1 })) }))));
       img.onload = () => {
         const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
         d.w = img.naturalWidth * scale;
@@ -1433,8 +1436,9 @@ let stopReading = null;
 class Stopped extends Error {}
 
 async function readScan() {
-  if (reading) return;
+  if (reading || scan.done) return;
   reading = true;
+  const s = scan; // this read's scan, whatever opens meanwhile
   $("no-music-send").hidden = true;
   $("scan").classList.add("reading");
   $("recognise").textContent = "Stop reading";
@@ -1448,67 +1452,70 @@ async function readScan() {
   });
   stopped.catch(() => {});
   const release = keepAwake();
-  scanId ??= crypto.randomUUID();
-  scanCreated ??= Date.now();
-  let saved = !rereading && (await db.put(scanEntry(true)).then(() => true, () => false));
+  s.id ??= crypto.randomUUID();
+  s.created ??= Date.now();
+  let saved = !s.rereading && (await db.put(scanEntry(s, true)).then(() => true, () => false));
   if (saved && reloadForThreads()) return;
   try {
     startWorker();
     await Promise.race([workerReady, stopped]);
     const t0 = performance.now();
     // Only a read of every page gives the time a whole score takes.
-    const fresh = pages.every((p) => !p.xml);
+    const fresh = s.pages.every((p) => !p.xml);
     // Systems you've just fixed are read as they are; Read again shows them
     // to check (the reader may group them differently now).
-    if (!scanSettings.systemsChecked) await checkSystems(stopped);
+    if (!s.settings.systemsChecked) await checkSystems(s, stopped);
     // (GoatCounter, 19 Nov: reads restarted here too, in the background.)
     $("read-step").hidden = $("read-hint").hidden = false;
     let dropped = false;
-    for (let i = 0; i < pages.length; i++) {
-      if (pages[i].xml) continue;
-      pageLabel = `Page ${i + 1} of ${pages.length}`;
+    for (let i = 0; i < s.pages.length; i++) {
+      if (s.pages[i].xml) continue;
+      pageLabel = `Page ${i + 1} of ${s.pages.length}`;
       setPageStatus("finding staves…");
       try {
-        const classes = pages[i].classes;
-        pages[i].classes = null;
-        pages[i].xml = await Promise.race([recognisePage(await pagePixels(pages[i].blob, pages[i]), scanSettings.systemHints?.[i], classes), stopped]);
+        const classes = s.pages[i].classes;
+        s.pages[i].classes = null;
+        s.pages[i].xml = await Promise.race([recognisePage(await pagePixels(s.pages[i].blob, s.pages[i]), s.settings.systemHints?.[i], classes), stopped]);
       } catch (e) {
         // A cover or words-only page: leave it out and read the rest (unless
         // it's the only page left, when the error is the answer).
-        if (e instanceof Stopped || pages.length === 1 || !NO_MUSIC.test(e.message)) throw e;
+        if (e instanceof Stopped || s.pages.length === 1 || !NO_MUSIC.test(e.message)) throw e;
         track("read-skipped-page");
-        URL.revokeObjectURL(pages[i].url);
-        pages.splice(i, 1);
-        forgetHints(i, true);
+        URL.revokeObjectURL(s.pages[i].url);
+        s.pages.splice(i, 1);
+        forgetHints(s, i, true);
         renderPages();
         i--;
         dropped = true;
       }
-      scanResumes = 0; // progress
+      s.resumes = 0; // progress
       // The photos are stored already: written again only when a page was
       // left out (every page's bytes, copied and rewritten for each page read).
-      if (saved) await db.update(scanId, { ...(dropped ? { images: pages.map((p) => p.blob) } : {}), pages: pages.map((p) => p.xml ?? null), found: foundLayouts(), resumes: 0 }).catch(() => {});
+      if (saved) await db.update(s.id, { ...(dropped ? { images: s.pages.map((p) => p.blob) } : {}), pages: s.pages.map((p) => p.xml ?? null), found: foundLayouts(s), resumes: 0 }).catch(() => {});
       dropped = false;
     }
     pageLabel = "";
     const secs = Math.round((performance.now() - t0) / 1000);
     readSeconds = fresh ? secs : null;
-    remember(readerLog, `Read ${plural(pages.length, "page")} in ${duration(secs)}${fresh ? "" : " (carried on from an earlier read)"}`, 40);
+    remember(readerLog, `Read ${plural(s.pages.length, "page")} in ${duration(secs)}${fresh ? "" : " (carried on from an earlier read)"}`, 40);
     setPageStatus(`Done in ${duration(secs)}`);
-    track("read-ok", `${pages.length} page${pages.length === 1 ? "" : "s"}`);
+    track("read-ok", `${s.pages.length} page${s.pages.length === 1 ? "" : "s"}`);
     track(`read-ok (${deviceTag})${lowMemory ? ": low memory" : ""}`);
-    if (!rereading && !scanSettings.sample) countRead();
+    if (!s.rereading && !s.settings.sample) countRead();
+    // Read: Read music does nothing more for it (tapped while the score was
+    // being saved, below, it read and saved the scan a second time).
+    s.done = true;
   } catch (e) {
     pageLabel = "";
     if (e instanceof Stopped) {
       // Not carried on by itself when the app next opens.
-      if (saved) await db.update(scanId, { stopped: true }).catch(() => {});
-      const done = pages.filter((p) => p.xml).length;
+      if (saved) await db.update(s.id, { stopped: true }).catch(() => {});
+      const done = s.pages.filter((p) => p.xml).length;
       setEngineStatus("");
       setPageStatus(
-        rereading
+        s.rereading
           ? "Stopped. The score is as it was."
-          : `Stopped${done ? ` after ${done} of ${pages.length} pages` : ""}. Tap Read music to carry on.`,
+          : `Stopped${done ? ` after ${done} of ${s.pages.length} pages` : ""}. Tap Read music to carry on.`,
       );
       return;
     }
@@ -1527,7 +1534,7 @@ async function readScan() {
     }
     // Not carried on by itself either: it would fail the same way at each
     // launch, and be counted as the phone closing the page (read-gave-up).
-    if (saved) await db.update(scanId, { stopped: true }).catch(() => {});
+    if (saved) await db.update(s.id, { stopped: true }).catch(() => {});
     // onnxruntime that didn't start won't in this reader: the next read gets a new one.
     if (/no available backend found|initWasm/.test(e.message)) resetWorker();
     track("read-failed");
@@ -1538,9 +1545,9 @@ async function readScan() {
     // whole message can run off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
     const why = lines.length > 1 ? `${lines.at(-1)}\n\n${e.message}` : e.message;
-    const page = pages.findIndex((p) => !p.xml) + 1;
+    const page = s.pages.findIndex((p) => !p.xml) + 1;
     if (NO_MUSIC.test(e.message)) {
-      countNoMusic(pages[page - 1], e.message);
+      countNoMusic(s.pages[page - 1], e.message);
       // Asked only of singers who have read a score before (so they know what
       // a good photo is): their misses are the ones most likely the reader's.
       $("no-music-send").hidden = !(+(localStorage.getItem(READS) || 0) > 0);
@@ -1566,21 +1573,22 @@ async function readScan() {
     $("read-step").hidden = true;
     $("read-hint").hidden = true;
     $("recognise").textContent = "Read music";
-    $("recognise").disabled = pages.length === 0;
+    $("recognise").disabled = s.pages.length === 0;
     release();
   }
-  const entry = scanEntry(false);
+  const entry = scanEntry(s, false);
   if (readSeconds) entry.readSeconds = readSeconds;
   // Which Partsong read it, on what: goes with the score when it's shared, so
   // a problem report says what read the music.
   entry.readBy = { version: SHOWN_VERSION, device: deviceKind, browser: ua, at: Date.now() };
   saved = await db.put(entry).then(() => true, () => false);
   if (!saved) setPageStatus("Read OK, but couldn't save it on this phone (storage full?).");
+  if (!saved) s.done = false; // Read music tries the save again
   // The reader isn't kept while the score is practised (its models and
   // working memory are hundreds of MB); the next read loads it from storage.
   resetWorker();
-  scanId = null;
-  rereading = false;
+  s.id = null;
+  s.rereading = false;
   // If they've gone back to the library meanwhile, it's just added there.
   if (!$("scan").hidden) openScore(entry, "replace");
   else renderLibrary();
@@ -1631,7 +1639,7 @@ async function openFiles(files) {
     // Read music (step 1 of 3, as with photos).
     if (pdfs.length && !busyReading()) {
       loadScan();
-      if ((await addFiles(pdfs)) && pages.length) setPageStatus("Check the pages, then tap Read music.");
+      if ((await addFiles(pdfs)) && scan.pages.length) setPageStatus("Check the pages, then tap Read music.");
     }
     if (!xmls.length) return;
     const title = parsePage(xmls[0]).title || name || "Imported score";
@@ -2674,8 +2682,8 @@ $("fix-done").onclick = () => {
   const { id, created, title, images, pages: xmls, pending: _pending, excluded: _excluded, ...settings } = liveEntry(current);
   prepared = preparedAudio = null;
   loadScan(images, xmls.map((x, i) => (changed.includes(i) ? null : x)), id, created, title);
-  scanSettings = { ...settings, systemHints: hints, systemsChecked: true };
-  rereading = true;
+  scan.settings = { ...settings, systemHints: hints, systemsChecked: true };
+  scan.rereading = true;
   readScan();
 };
 
@@ -3052,14 +3060,14 @@ $("read-again").onclick = () => {
   prepared = preparedAudio = null;
   loadScan(images, [], id, created, title);
   // Its systems are shown to check again, with any you fixed before.
-  scanSettings = { ...settings, systemsChecked: false };
-  rereading = true;
+  scan.settings = { ...settings, systemsChecked: false };
+  scan.rereading = true;
   readScan();
 };
 
 $("delete").onclick = () => {
   // Being read again (Read again, then opened from the library): the read's save would bring it back.
-  if (reading && current.id === scanId) {
+  if (reading && current.id === scan.id) {
     $("delete").textContent = "Stop reading it first";
     setTimeout(() => ($("delete").textContent = "Delete"), 3000);
     return;
