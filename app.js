@@ -3216,7 +3216,9 @@ async function renderRead() {
 }
 
 if ("serviceWorker" in navigator && location.hostname !== "localhost") {
-  navigator.serviceWorker.register("sw.js");
+  // Some browsers refuse (seen: Android, "Rejected"; an in-app browser or a
+  // private mode). Partsong works without it, only not offline: counted, not shown.
+  navigator.serviceWorker.register("sw.js").catch((e) => track(`no-service-worker (${deviceTag}): ${failureReason(e)}`));
 }
 
 if (location.hash.startsWith("#s=")) {
