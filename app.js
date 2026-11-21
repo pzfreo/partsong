@@ -638,7 +638,7 @@ function startWorker() {
   // A reader that can't start is reported by the read that waits for it
   // (opening the scan screen starts it with nobody waiting: that showed its error raw).
   workerReady.catch(() => {});
-  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, noGpu: lowMemory, ios: iDevice, threads: tunedThreads(), gpu: tunedGpu() });
+  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, noGpu: lowMemory, ios: iDevice, threads: tunedThreads(), gpu: tunedGpu(), memoryMax: memoryMaxTest() });
 }
 
 // The exact encoder's thread count, measured once on this device (see tune()
@@ -689,6 +689,17 @@ function exactEncoder() {
     return localStorage.getItem("partsong-exact") === "1";
   } catch {
     return false;
+  }
+}
+
+// Test switch (localStorage partsong-memory-max, in 64 KB pages): the reader's
+// worker is refused shared memory that could grow past it, as an iPhone
+// sometimes refuses onnxruntime's 4 GB (see MEMORY_STEPS in omr-worker.js).
+function memoryMaxTest() {
+  try {
+    return +localStorage.getItem("partsong-memory-max") || 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -772,7 +783,8 @@ if (iDevice) {
 // A quick check, each time the scan screen opens, that this browser can run
 // the music reader: WebAssembly SIMD, and the memory onnxruntime reserves
 // when it starts (a shared block that can grow to 4 GB; iPhones sometimes
-// refuse it, "RangeError: Out of memory"). Done in a throwaway worker, closed
+// refuse it, "RangeError: Out of memory", and the reader then asks for less:
+// "ok with 1024 MB"; "memory" is none at all). Done in a throwaway worker, closed
 // at once so the memory is freed; nothing is downloaded. It warns rather than
 // blocks: free memory changes as apps close. Counted by device and version.
 const PROBE = `
@@ -782,8 +794,17 @@ try {
   if (!WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11]))) r = "no SIMD";
 } catch { r = "no WebAssembly"; }
 if (r === "ok") {
-  try { new WebAssembly.Memory({ initial: 256, maximum: 65536, shared: true }); }
-  catch (e) { r = e instanceof RangeError ? "memory" : "other: " + String(e.message || e).slice(0, 60); }
+  // As the reader does (MEMORY_STEPS in omr-worker.js): 4 GB to grow into, else less, down to 512 MB.
+  r = "memory";
+  for (const maximum of [65536, 32768, 16384, 12288, 8192]) {
+    try {
+      new WebAssembly.Memory({ initial: 256, maximum, shared: true });
+      r = maximum === 65536 ? "ok" : "ok with " + maximum / 16 + " MB";
+      break;
+    } catch (e) {
+      if (!(e instanceof RangeError)) { r = "other: " + String(e.message || e).slice(0, 60); break; }
+    }
+  }
 }
 postMessage(r);`;
 let probeCounted = false;

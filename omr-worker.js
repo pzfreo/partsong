@@ -20,6 +20,34 @@ const GPU_MODELS = new Set([MODELS[0], MODELS[1]]);
 let ort;
 
 const post = (msg, transfer) => self.postMessage(msg, transfer);
+
+// onnxruntime starts by asking for a shared block of memory that can grow to
+// 4 GB. The whole 4 GB is set aside (not used) at once, and iPhones and iPads
+// sometimes refuse it: "RangeError: Out of memory", which was every
+// out-of-memory failed read there (GoatCounter, v307-v319: 13, all in low
+// memory, where a read has already been cut short once). Refused, it's asked
+// for again with less room to grow, down to 512 MB (segnet, the one model
+// always on onnxruntime, takes about 230 MB). The same for the reader's own
+// threads' memory (encoder_pool.mjs). Nothing changes where 4 GB is given.
+const MEMORY_STEPS = [32768, 16384, 12288, 8192]; // 64 KB pages: 2 GB, 1 GB, 768 MB, 512 MB
+let refuseAbove = Infinity; // test switch (init's memoryMax): refuse more pages than this, as an iPhone might
+{
+  const Memory = WebAssembly.Memory;
+  WebAssembly.Memory = function (d) {
+    const sizes = d?.shared && d.maximum > MEMORY_STEPS.at(-1) ? [d.maximum, ...MEMORY_STEPS.filter((pages) => pages < d.maximum)] : [d?.maximum];
+    for (const [i, maximum] of sizes.entries()) {
+      try {
+        if (maximum > refuseAbove) throw new RangeError("Out of memory");
+        const memory = new Memory(i ? { ...d, maximum } : d);
+        if (i) post({ type: "log", msg: `Memory: ${d.maximum / 16} MB to grow into was refused, got ${maximum / 16} MB` });
+        return memory;
+      } catch (e) {
+        if (!(e instanceof RangeError) || i === sizes.length - 1) throw e;
+      }
+    }
+  };
+  WebAssembly.Memory.prototype = Memory.prototype;
+}
 const sessions = [];
 const sessionNames = []; // id -> model name
 const onGpu = new Set(); // ids of sessions created on WebGPU
@@ -732,6 +760,7 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
       if (typeof data.ios === "boolean") IOS = data.ios;
+      if (data.memoryMax > 0) refuseAbove = data.memoryMax;
       if (Number.isInteger(data.threads) && data.threads > 0) encoderThreads = data.threads;
       if (typeof data.gpu === "boolean") encoderGpu = data.gpu;
       ready ??= init(!!data.noGpu, !!data.exact);
