@@ -1123,10 +1123,16 @@ async function resumeUnfinished() {
   const where = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
   const at = `${where}, ${hidden ? "in the background" : "on screen"}`;
   const before = lastCrumbs();
-  report(resumes === 2 ? "read-gave-up" : "read-restarted", at, { stage: where, reader: before?.reader, detail: { resumes, pages: n, background: hidden, ...before?.detail } });
+  // Carried on in low memory, as memory is the likely reason a phone closed
+  // the page. Not a computer whose tab was in the background: browsers put
+  // idle background tabs to sleep to save memory (Chrome's Memory Saver), which
+  // says nothing about this page's (problem log, 21 Nov: both Windows restarts
+  // were that, one while waiting on the check screen, and then read slowly).
+  const slowly = !(hidden && !iDevice && deviceKind !== "Android");
+  report(resumes === 2 ? "read-gave-up" : "read-restarted", at, { stage: where, reader: before?.reader, detail: { resumes, pages: n, background: hidden, carriesOnSlowly: slowly, ...before?.detail } });
   if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
   track(`read-restarted (${deviceTag}): ${at}`);
-  lowMemory = true;
+  lowMemory = slowly;
   if (worker) resetWorker(); // started without it (prefetch)
   resumeScan({ ...entry, resumes: resumes + 1 }); // as just saved: readScan's save keeps it
 }
