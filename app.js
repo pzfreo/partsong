@@ -610,6 +610,7 @@ function startWorker() {
         tuned?.();
       } else if (data.type === "log") {
         console.log("[omr]", data.msg);
+        crumb(data.msg);
         if (SETUP_LOG.test(data.msg)) remember(readerSetup, String(data.msg).slice(0, 200), 10);
         else remember(readerLog, String(data.msg).slice(0, 200), 40);
         const m = /Running TrOmr inference on staff image (\d+)/.exec(data.msg);
@@ -861,7 +862,7 @@ function checkDevice() {
 // visit, and 20 at most: something failing in a loop sends one.
 const VISIT = crypto.randomUUID().slice(0, 13); // new each time the app opens, kept nowhere: ties a visit's records together
 const reported = new Set();
-// more: { stage, place (a stack), detail (an object of facts) }
+// more: { stage, place (a stack), detail (an object of facts), reader (in place of the reader's log) }
 function report(kind, message, more = {}) {
   try {
     // (Tests run on localhost: only to a relay of their own.)
@@ -879,11 +880,59 @@ function report(kind, message, more = {}) {
       message: String(message).slice(0, 2000),
       place: more.place ? String(more.place).slice(0, 2000) : undefined,
       detail: { lowMemory, isolated: self.crossOriginIsolated, cores: navigator.hardwareConcurrency, memoryGB: navigator.deviceMemory, ...more.detail },
-      reader: readerLog.slice(-20).join("\n"),
+      reader: more.reader ?? readerLog.slice(-20).join("\n"),
     });
     // (A string body is text/plain: a "simple" request, with no preflight.)
     fetch(relayUrl() + "/log", { method: "POST", body, keepalive: true }).catch(() => {});
   } catch {}
+}
+
+// Breadcrumbs: when the phone closes the page mid-read, everything in memory
+// goes with it, so the record sent at the next launch couldn't say what the
+// reader was doing. While a read runs, its last few messages are kept in the
+// phone's storage with the time (and "alive", every 2 s, for when the page
+// last ran). A restart's record carries them; they're cleared when a read ends.
+const CRUMBS = "partsong-read-crumbs";
+let crumbs = null; // { start, alive, lines: [[ms, text], …] } while a read runs
+let crumbTimer;
+function saveCrumbs() {
+  if (!crumbs) return;
+  crumbs.alive = Date.now();
+  try { localStorage.setItem(CRUMBS, JSON.stringify(crumbs)); } catch {}
+}
+function crumb(text) {
+  if (!crumbs) return;
+  crumbs.lines.push([Date.now(), String(text).slice(0, 120)]);
+  if (crumbs.lines.length > 8) crumbs.lines.shift();
+  saveCrumbs();
+}
+function startCrumbs() {
+  crumbs = { start: Date.now(), lines: [] };
+  clearInterval(crumbTimer);
+  crumbTimer = setInterval(saveCrumbs, 2000);
+  saveCrumbs();
+}
+function endCrumbs() {
+  clearInterval(crumbTimer);
+  crumbs = null;
+  try { localStorage.removeItem(CRUMBS); } catch {}
+}
+// The last read's, for a restart's record: its messages with their times, how
+// long it had run (to the last message), how long it was then quiet with the
+// page still running, and how long the page was gone before this launch.
+function lastCrumbs() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CRUMBS));
+    if (!c?.start) return null;
+    const last = c.lines.at(-1)?.[0] ?? c.start;
+    const secs = (ms) => Math.round(ms / 1000);
+    return {
+      reader: c.lines.map(([t, text]) => `${new Date(t).toISOString().slice(11, 19)} ${text}`).join("\n"),
+      detail: { ranSecs: secs(last - c.start), quietSecs: secs(c.alive - last), goneSecs: secs(Date.now() - c.alive) },
+    };
+  } catch {
+    return null;
+  }
 }
 
 function track(name, title = name, tries = 30) {
@@ -1073,7 +1122,8 @@ async function resumeUnfinished() {
   try { hidden = localStorage.getItem(READ_HIDDEN) === "1"; } catch {}
   const where = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
   const at = `${where}, ${hidden ? "in the background" : "on screen"}`;
-  report(resumes === 2 ? "read-gave-up" : "read-restarted", at, { stage: where, detail: { resumes, pages: n, background: hidden } });
+  const before = lastCrumbs();
+  report(resumes === 2 ? "read-gave-up" : "read-restarted", at, { stage: where, reader: before?.reader, detail: { resumes, pages: n, background: hidden, ...before?.detail } });
   if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
   track(`read-restarted (${deviceTag}): ${at}`);
   lowMemory = true;
@@ -1369,6 +1419,7 @@ async function checkSystems(s, stopped) {
     for (const i of todo) {
       // Progress is on the status line until the check opens, then on its bar.
       pageLabel = check ? "" : `Page ${i + 1} of ${s.pages.length}`;
+      crumb(`finding systems: page ${i + 1} of ${s.pages.length}`);
       if (!check) setPageStatus("finding lines of music…");
       check?.waiting(`Finding systems: page ${i + 1} of ${s.pages.length}…`);
       // A page whose systems were found before the app was closed (a phone
@@ -1525,6 +1576,7 @@ async function readScan() {
   });
   stopped.catch(() => {});
   const release = keepAwake();
+  startCrumbs();
   s.id ??= crypto.randomUUID();
   s.created ??= Date.now();
   let saved = !s.rereading && (await db.put(scanEntry(s, true)).then(() => true, () => false));
@@ -1544,6 +1596,7 @@ async function readScan() {
     for (let i = 0; i < s.pages.length; i++) {
       if (s.pages[i].xml) continue;
       pageLabel = `Page ${i + 1} of ${s.pages.length}`;
+      crumb(`reading the notes: page ${i + 1} of ${s.pages.length}`);
       setPageStatus("finding staves…");
       try {
         const classes = s.pages[i].classes;
@@ -1654,6 +1707,7 @@ async function readScan() {
     return;
   } finally {
     reading = false;
+    endCrumbs();
     $("scan").classList.remove("reading");
     stopReading = null;
     $("systems-check").hidden = true;
