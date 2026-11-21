@@ -16,7 +16,7 @@ bucket_name = "partsong-shares"
 [[d1_databases]]
 binding = "LOG"
 database_name = "partsong-log"
-database_id = "TO-BE-CREATED"
+database_id = "d92a978c-6b0c-4f3c-8a69-65f535a4c2ff"
 
 [vars]
 # The app, and the test site (partsong-test.vercel.app), whose Send link
