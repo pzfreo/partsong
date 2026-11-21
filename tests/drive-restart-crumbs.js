@@ -7,7 +7,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const seed = (resumes, images = []) => new Promise((res) => { const q = indexedDB.open("partscanner", 1); q.onupgradeneeded = () => q.result.createObjectStore("scores", { keyPath: "id" }); q.onsuccess = () => { const tx = q.result.transaction("scores", "readwrite"); const s = tx.objectStore("scores"); s.clear(); if (resumes != null) s.put({ id: "cut", title: "Cut off", created: 1, images, pages: images.map(() => null), pending: true, resumes }); tx.oncomplete = () => { q.result.close(); res(); }; }; });
 const now = Date.now();
 // As a read left it: started 40 s ago, last message 12 s ago, page last ran 10 s ago.
-localStorage.setItem("partsong-read-crumbs", JSON.stringify({ start: now - 40000, alive: now - 10000, lines: [[now - 30000, "reading the notes: page 1 of 1"], [now - 12000, "Running TrOmr inference on staff image 3"]] }));
+localStorage.setItem("partsong-read-crumbs", JSON.stringify({ id: "cut", start: now - 40000, alive: now - 10000, lines: [[now - 30000, "reading the notes: page 1 of 1"], [now - 12000, "Running TrOmr inference on staff image 3"]] }));
 localStorage.setItem("partsong.relay", "http://localhost:9"); // nothing there: the records are caught below
 await seed(0);
 const f = document.createElement("iframe");

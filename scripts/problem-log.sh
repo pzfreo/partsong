@@ -23,6 +23,6 @@ print(f"({len(rows)} records)")' "$2"; }
 case "$1" in
   visit) run "SELECT datetime(at/1000,'unixepoch') AS time, kind, version, device, stage, message, place, detail, reader, browser FROM log WHERE visit = '${2//[^A-Za-z0-9-]/}' ORDER BY at" full ;;
   sql) run "$2" full ;;
-  *) days=$(( ${1//[^0-9]/} + 0 )); [ "$days" -gt 0 ] || days=2
+  *) d=${1//[^0-9]/}; days=$(( 10#${d:-0} )); [ "$days" -gt 0 ] || days=2 # (10#: "08" isn't octal)
      run "SELECT datetime(at/1000,'unixepoch') AS time, visit, kind, device || ' ' || version AS on_, stage, substr(message,1,110) AS message FROM log WHERE at > (strftime('%s','now') - $days*86400)*1000 ORDER BY at" line ;;
 esac

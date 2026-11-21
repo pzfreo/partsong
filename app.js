@@ -860,16 +860,21 @@ function checkDevice() {
 // the code, what was happening, the device, and the music reader's last
 // messages. Never a score, its name or a page. The first of each problem in a
 // visit, and 20 at most: something failing in a loop sends one.
+let reportsSent = 0;
 const VISIT = crypto.randomUUID().slice(0, 13); // new each time the app opens, kept nowhere: ties a visit's records together
-const reported = new Set();
+const reported = new Map(); // problem -> times sent
 // more: { stage, place (a stack), detail (an object of facts), reader (in place of the reader's log) }
 function report(kind, message, more = {}) {
   try {
     // (Tests run on localhost: only to a relay of their own.)
     if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !localStorage.getItem("partsong.relay")) return;
+    // An error once; a failed or interrupted read up to three times (the second
+    // "no music" is the one after the page was turned or retaken).
     const key = `${kind}: ${message}`;
-    if (reported.has(key) || reported.size >= 20) return;
-    reported.add(key);
+    const times = reported.get(key) ?? 0;
+    if (times >= (kind === "error" ? 1 : 3) || reportsSent >= 20) return;
+    reported.set(key, times + 1);
+    reportsSent++;
     const body = JSON.stringify({
       visit: VISIT,
       kind,
@@ -906,8 +911,8 @@ function crumb(text) {
   if (crumbs.lines.length > 8) crumbs.lines.shift();
   saveCrumbs();
 }
-function startCrumbs() {
-  crumbs = { start: Date.now(), lines: [] };
+function startCrumbs(id) {
+  crumbs = { id, start: Date.now(), lines: [] }; // id: the scan's, so another scan's restart doesn't take them for its own
   clearInterval(crumbTimer);
   crumbTimer = setInterval(saveCrumbs, 2000);
   saveCrumbs();
@@ -920,10 +925,10 @@ function endCrumbs() {
 // The last read's, for a restart's record: its messages with their times, how
 // long it had run (to the last message), how long it was then quiet with the
 // page still running, and how long the page was gone before this launch.
-function lastCrumbs() {
+function lastCrumbs(id) {
   try {
     const c = JSON.parse(localStorage.getItem(CRUMBS));
-    if (!c?.start) return null;
+    if (!c?.start || c.id !== id) return null;
     const last = c.lines.at(-1)?.[0] ?? c.start;
     const secs = (ms) => Math.round(ms / 1000);
     return {
@@ -1122,13 +1127,14 @@ async function resumeUnfinished() {
   try { hidden = localStorage.getItem(READ_HIDDEN) === "1"; } catch {}
   const where = entry.systemsChecked ? `page ${Math.min((entry.pages?.filter(Boolean).length ?? 0) + 1, n)} of ${n}` : `finding systems, ${n} page${n === 1 ? "" : "s"}`;
   const at = `${where}, ${hidden ? "in the background" : "on screen"}`;
-  const before = lastCrumbs();
+  const before = lastCrumbs(entry.id);
   // Carried on in low memory, as memory is the likely reason a phone closed
   // the page. Not a computer whose tab was in the background: browsers put
   // idle background tabs to sleep to save memory (Chrome's Memory Saver), which
   // says nothing about this page's (problem log, 21 Nov: both Windows restarts
   // were that, one while waiting on the check screen, and then read slowly).
-  const slowly = !(hidden && !iDevice && deviceKind !== "Android");
+  // (Only the first time: a tab that goes twice may be short of memory after all.)
+  const slowly = !(hidden && resumes === 0 && !iDevice && deviceKind !== "Android");
   report(resumes === 2 ? "read-gave-up" : "read-restarted", at, { stage: where, reader: before?.reader, detail: { resumes, pages: n, background: hidden, carriesOnSlowly: slowly, ...before?.detail } });
   if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
   track(`read-restarted (${deviceTag}): ${at}`);
@@ -1425,6 +1431,7 @@ async function checkSystems(s, stopped) {
     for (const i of todo) {
       // Progress is on the status line until the check opens, then on its bar.
       pageLabel = check ? "" : `Page ${i + 1} of ${s.pages.length}`;
+      s.working = i; // for an error's message and record: the page it was on
       crumb(`finding systems: page ${i + 1} of ${s.pages.length}`);
       if (!check) setPageStatus("finding lines of music…");
       check?.waiting(`Finding systems: page ${i + 1} of ${s.pages.length}…`);
@@ -1582,9 +1589,10 @@ async function readScan() {
   });
   stopped.catch(() => {});
   const release = keepAwake();
-  startCrumbs();
+  delete s.working;
   s.id ??= crypto.randomUUID();
   s.created ??= Date.now();
+  startCrumbs(s.id);
   let saved = !s.rereading && (await db.put(scanEntry(s, true)).then(() => true, () => false));
   if (saved && reloadForThreads()) return;
   try {
@@ -1602,6 +1610,7 @@ async function readScan() {
     for (let i = 0; i < s.pages.length; i++) {
       if (s.pages[i].xml) continue;
       pageLabel = `Page ${i + 1} of ${s.pages.length}`;
+      s.working = i;
       crumb(`reading the notes: page ${i + 1} of ${s.pages.length}`);
       setPageStatus("finding staves…");
       try {
@@ -1657,7 +1666,7 @@ async function readScan() {
     // as after a closed page. Already in low memory: say so plainly.
     const outOfMemory = OUT_OF_MEMORY.test(e.message);
     // For the problem log: where the read was, and the page it was on.
-    const at = s.pages.findIndex((p) => !p.xml);
+    const at = s.working ?? Math.max(0, s.pages.findIndex((p) => !p.xml));
     const facts = {
       stage: `${s.settings.systemsChecked ? "reading the notes" : "finding systems"}, page ${at + 1} of ${s.pages.length}`,
       place: e.stack,
@@ -1686,7 +1695,7 @@ async function readScan() {
     // whole message can run off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
     const why = lines.length > 1 ? `${lines.at(-1)}\n\n${e.message}` : e.message;
-    const page = s.pages.findIndex((p) => !p.xml) + 1;
+    const page = at + 1;
     if (NO_MUSIC.test(e.message)) {
       countNoMusic(s.pages[page - 1], e);
       // Asked of singers who have read a score before (so they know what a

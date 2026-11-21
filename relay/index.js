@@ -17,10 +17,16 @@ const LOG_MAX_A_DAY = 5000; // far more than real use: a stuck or hostile sender
 const LOG_KEEP_DAYS = 90;
 const LOG_KINDS = ["error", "read-failed", "read-restarted", "read-gave-up", "read-out-of-memory", "no-music"];
 const text = (v, max) => (v == null ? null : String(v).slice(0, max));
+// The facts as JSON, whole or not at all (cut short, it wouldn't parse).
+const detail = (d) => {
+  const json = JSON.stringify(d ?? {});
+  return json.length <= 4000 ? json : '{"dropped":"too long"}';
+};
 
 async function keepLog(request, env) {
+  if (Number(request.headers.get("Content-Length")) > LOG_MAX_BYTES) return 413; // before it's read
   const body = await request.text();
-  if (body.length > LOG_MAX_BYTES) return 413;
+  if (new TextEncoder().encode(body).length > LOG_MAX_BYTES) return 413;
   let r;
   try {
     r = JSON.parse(body);
@@ -33,7 +39,7 @@ async function keepLog(request, env) {
   const { n } = await env.LOG.prepare("SELECT COUNT(*) AS n FROM log WHERE day = ?").bind(day).first();
   if (n >= LOG_MAX_A_DAY) return 429;
   await env.LOG.prepare("INSERT INTO log (at, day, visit, kind, version, device, browser, stage, message, place, detail, reader) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(now, day, text(r.visit, 40), r.kind, text(r.version, 20), text(r.device, 20), text(r.browser, 300), text(r.stage, 120), text(r.message, 2000), text(r.place, 2000), text(JSON.stringify(r.detail ?? {}), 2000), text(r.reader, 8000))
+    .bind(now, day, text(r.visit, 40), r.kind, text(r.version, 20), text(r.device, 20), text(r.browser, 300), text(r.stage, 120), text(r.message, 2000), text(r.place, 2000), detail(r.detail), text(r.reader, 8000))
     .run();
   // Old records go as new ones arrive (now and then: no schedule to keep).
   if (Math.random() < 0.02) await env.LOG.prepare("DELETE FROM log WHERE at < ?").bind(now - LOG_KEEP_DAYS * 864e5).run();
