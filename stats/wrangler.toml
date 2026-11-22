@@ -1,0 +1,17 @@
+# Partsong's analytics page: GoatCounter's counts and the problem log on one
+# page, behind a password. Kept apart from the relay so the public relay never
+# holds the GoatCounter key.
+# Secrets (set once, never in this file):
+#   npx wrangler secret put PASSWORD
+#   npx wrangler secret put GOATCOUNTER_KEY < ~/.config/goatcounter-key
+# Deploy: npx wrangler deploy (from this directory).
+# Local: put PASSWORD=… and GOATCOUNTER_KEY=… in .dev.vars, then npx wrangler dev.
+name = "partsong-stats"
+main = "index.js"
+compatibility_date = "2026-10-01"
+
+# The problem log (relay/schema.sql), read only here.
+[[d1_databases]]
+binding = "LOG"
+database_name = "partsong-log"
+database_id = "d92a978c-6b0c-4f3c-8a69-65f535a4c2ff"

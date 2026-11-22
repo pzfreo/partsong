@@ -88,6 +88,8 @@ then *Add to Home screen*.
   reader's last messages; never a score, its name or a page. The first of each
   problem in a visit, 20 at most. Read it with `scripts/problem-log.sh`
   (`tests/drive-problem-log.js` needs `wrangler dev`, see its header).
+  The same log and GoatCounter's counts are on one page behind a password:
+  the `partsong-stats` Worker (`stats/`, secrets and deploy in its wrangler.toml).
 - **Share by link** (`share.js`, `relay/`): sharing uploads the score's PDF,
   encrypted on the phone (AES-GCM), to a Cloudflare Worker + R2 relay, and
   shares just the link `https://partsong.app/#s=<id>.<key>` (WhatsApp drops a

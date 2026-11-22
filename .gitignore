@@ -7,3 +7,6 @@ undefined-*.png
 .wrangler/
 lib/
 shots/
+
+# Local secrets for wrangler dev
+.dev.vars
