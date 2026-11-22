@@ -1427,6 +1427,7 @@ async function checkSystems(s, stopped) {
   // Each page is shown to check as soon as its systems are found, so you
   // check page 1 while the rest are found; Read music waits for the last.
   let check = null;
+  let finderRan = false;
   try {
     for (const i of todo) {
       // Progress is on the status line until the check opens, then on its bar.
@@ -1439,6 +1440,7 @@ async function checkSystems(s, stopped) {
       // reloading under memory pressure) isn't done again.
       if (!s.pages[i].layout) {
         try {
+          finderRan = true;
           const r = await Promise.race([layoutPage(await pagePixels(s.pages[i].blob, s.pages[i]), s.settings.systemHints?.[i]), stopped]);
           s.pages[i].layout = r.systems;
           s.pages[i].parts = r.parts;
@@ -1463,6 +1465,17 @@ async function checkSystems(s, stopped) {
     const found = `Systems (staves in each): ${todo.map((i) => `p${i + 1} ${(s.pages[i].layout ?? []).map((sys) => sys.length).join(",") || "none"} parts ${s.pages[i].parts?.join("") ?? "-"}`).join("; ")}`;
     console.log("[omr]", found);
     remember(readerLog, found, 40);
+    // A new reader for the notes, started while the pages are checked: the
+    // staff finder's working memory is never given back (WebAssembly memory
+    // can't shrink), and it stayed through the whole of reading the notes.
+    // iPhone simulator, Safari, 3 runs each: while reading, highest 1,016 ->
+    // 675 MB (2 photos), 1,015 -> 669 (5 photos), low memory 779 -> 586. The
+    // iPhones the phone closed mid-read were closed then (problem log, 21-22
+    // Nov). The models come from storage again: about a second, unseen here.
+    if (finderRan) {
+      resetWorker();
+      startWorker();
+    }
     if (check) {
       const hints = await Promise.race([check.done(doubtfulPages(s, todo)), stopped]);
       if (Object.keys(hints).length) {
@@ -1603,7 +1616,10 @@ async function readScan() {
     const fresh = s.pages.every((p) => !p.xml);
     // Systems you've just fixed are read as they are; Read again shows them
     // to check (the reader may group them differently now).
-    if (!s.settings.systemsChecked) await checkSystems(s, stopped);
+    if (!s.settings.systemsChecked) {
+      await checkSystems(s, stopped);
+      await Promise.race([workerReady, stopped]); // the new reader (see checkSystems)
+    }
     // (GoatCounter, 19 Nov: reads restarted here too, in the background.)
     $("read-step").hidden = $("read-hint").hidden = false;
     let dropped = false;

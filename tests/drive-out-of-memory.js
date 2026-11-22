@@ -63,7 +63,7 @@ $("recognise").click();
 await waitFor(() => !$("practice").hidden, 300000, "practice 2");
 r.twice.thenRead = events.filter((p) => /^read-ok \(/.test(p));
 
-r.ok = r.once.carriedOn && r.once.inits.at(-1) === "exact true, noGpu true" && r.once.inits.length === 2 &&
+r.ok = r.once.carriedOn && r.once.inits.join("; ") === "exact false, noGpu false; exact false, noGpu false; exact true, noGpu true" &&
   r.once.counted.includes("read-out-of-memory (iPad dev): carried on in low memory") && r.once.counted.includes("read-ok (iPad dev): low memory") &&
   !r.once.counted.some((p) => p.startsWith("read-failed")) &&
   r.twice.status === "Couldn't read page 1: there wasn't enough memory.\nClose other apps and browser tabs, then tap Read music to carry on from this page." &&
