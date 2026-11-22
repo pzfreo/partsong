@@ -33,36 +33,54 @@ async function allowed(request, env) {
   return crypto.subtle.timingSafeEqual(a, b);
 }
 
-// Every path and event, day by day, for the last `days` days (UTC), kept a
-// few minutes so reloading doesn't run into GoatCounter's rate limit.
-async function goatHits(env, ctx, days) {
-  const end = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
-  const start = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
-  const key = new Request(`https://stats.cache/${start}/${end}`);
-  const cached = await caches.default.match(key);
-  if (cached) return cached.json();
+// Every path and event, day by day, for the last `days` days (UTC). Fetched a
+// week at a time: paging uses exclude_paths, and GoatCounter refuses the URL
+// after ~900 ids (a fortnight's worth). Weeks are kept a while (the current
+// one a few minutes) so reloading doesn't run into GoatCounter's rate limit.
+async function goat(env, u) {
+  let why;
+  for (let t = 0; t < 4; t++) {
+    const r = await fetch(GOAT + u, { headers: { Authorization: "Bearer " + env.GOATCOUNTER_KEY } });
+    if (r.status === 401 || r.status === 403) throw new Error("GoatCounter refused the key");
+    why = String(r.status);
+    if (r.ok) {
+      const d = await r.json().catch((e) => { why += ": " + e.message; });
+      if (d) return d;
+    }
+    await new Promise((res) => setTimeout(res, 1500 * (t + 1)));
+  }
+  throw new Error(`GoatCounter didn't answer (${why})`);
+}
+
+async function week(env, ctx, start, end, secs) {
+  const key = new Request(`https://stats.cache/week/${start}/${end}`);
+  const hit = await caches.default.match(key);
+  if (hit) return hit.json();
   const hits = [];
   const seen = [];
-  for (let page = 0; page < 20; page++) {
-    let u = `${GOAT}stats/hits?start=${start}&end=${end}&limit=100&daily=true`;
-    if (seen.length) u += "&exclude_paths=" + seen.join(",");
-    let d;
-    for (let t = 0; t < 4; t++) {
-      const r = await fetch(u, { headers: { Authorization: "Bearer " + env.GOATCOUNTER_KEY } });
-      if (r.ok) { d = await r.json().catch(() => null); if (d) break; }
-      if (r.status === 401 || r.status === 403) throw new Error("GoatCounter refused the key");
-      await new Promise((res) => setTimeout(res, 2000));
-    }
-    if (!d) throw new Error("GoatCounter didn't answer");
+  for (let page = 0; page < 15; page++) {
+    const d = await goat(env, `stats/hits?start=${start}&end=${end}&limit=100&daily=true${seen.length ? "&exclude_paths=" + seen.join(",") : ""}`);
     for (const h of d.hits) {
       seen.push(h.path_id);
-      hits.push({ path: h.path, event: h.event, days: Object.fromEntries(h.stats.map((s) => [s.day, s.daily])) });
+      hits.push({ path: h.path, days: Object.fromEntries(h.stats.map((x) => [x.day, x.daily])) });
     }
     if (!d.more || !d.hits.length) break;
   }
-  const out = { start, end, hits };
-  ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify(out), { headers: { "Cache-Control": `max-age=${CACHE_SECS}` } })));
-  return out;
+  ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify(hits), { headers: { "Cache-Control": `max-age=${secs}` } })));
+  return hits;
+}
+
+async function goatHits(env, ctx, days) {
+  const day = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+  const byPath = new Map();
+  for (let w = 0; w < days / 7; w++) {
+    for (const h of await week(env, ctx, day(-7 * w - 6), day(-7 * w + 1), w ? 3600 : CACHE_SECS)) {
+      const row = byPath.get(h.path) || { path: h.path, days: {} };
+      Object.assign(row.days, h.days);
+      byPath.set(h.path, row);
+    }
+  }
+  return { start: day(1 - days), end: day(1), hits: [...byPath.values()] };
 }
 
 async function problemLog(env) {
