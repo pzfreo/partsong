@@ -257,6 +257,14 @@ pub extern "C" fn panic_len() -> usize {
     PANIC.try_lock().map_or(0, |p| p.len())
 }
 
+/// Once read: an old panic mustn't be taken for a later failure's.
+#[no_mangle]
+pub extern "C" fn panic_clear() {
+    if let Ok(mut p) = PANIC.try_lock() {
+        p.clear();
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn alloc(n: usize) -> *mut u8 {
     let mut v = Vec::<u8>::with_capacity(n);

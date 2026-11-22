@@ -450,7 +450,7 @@ async function threadedModule(threads) {
 async function rustDecoder() {
   if (decoderInstance) return decoderInstance;
   const t0 = performance.now();
-  const { rs, build } = await decoderModule();
+  const { rs, build } = (loadingDecoder = await decoderModule());
   let p, n;
   await modelBytes(MODELS[2], false, (size) => ((p = rs.decoder_alloc((n = size))), new Uint8Array(rs.memory.buffer, p, n)));
   const model = rs.decoder_load(p, n);
@@ -490,6 +490,7 @@ async function rustDecoder() {
       }
     }
   }
+  loadingDecoder = null;
   return (decoderInstance = d);
 }
 
@@ -552,12 +553,22 @@ function hooked(rs) {
   rs.panic_hook?.();
   return rs;
 }
-// After a trap: the panic's message from whichever reader panicked, else "".
+// The decoder's reader while its models load (it's decoderInstance only once
+// loaded): a panic there is a panic too, not memory.
+let loadingDecoder = null;
+// After a failure: the panic's message from whichever reader panicked (also
+// on a thread of the encoder pool, which shares its memory), else null. Read
+// once, then cleared.
 function panicText() {
-  for (const [rs, build] of [[pageReader, "page reader"], [decoderInstance?.rs, decoderInstance?.build]]) {
+  const readers = [[pageReader, "page reader"], [decoderInstance?.rs ?? loadingDecoder?.rs, decoderInstance?.build ?? loadingDecoder?.build]];
+  for (const [rs, build] of readers) {
     const n = rs?.panic_len?.();
-    // Its place without the build machine's folders: "homr-rs/src/....rs:12:5".
-    if (n) return { build, text: new TextDecoder().decode(new Uint8Array(rs.memory.buffer, rs.panic_ptr(), n).slice()).replace(/\S*\/(homr-rs|omr-rs)\S*?\/src\//g, "$1/src/") };
+    if (!n) continue;
+    const text = new TextDecoder().decode(new Uint8Array(rs.memory.buffer, rs.panic_ptr(), n).slice());
+    rs.panic_clear?.();
+    // Its place without the build machine's folders: "homr-rs/src/....rs:12:5",
+    // "alloc/src/...", "serde-1.0.0/src/...".
+    return { build, text: text.replace(/\S*\/(homr-rs|omr-rs)\S*?\/src\//g, "$1/src/").replace(/\/(?:[^\s/:]+\/)*([^\s/:]+)\/src\//g, "$1/src/") };
   }
   return null;
 }
@@ -571,8 +582,16 @@ const PANIC_MACHINERY = /panicking|panic_fmt|panic_handler|rust_begin_unwind|rus
 function rustFrames(e, build) {
   const frames = String(e.stack ?? "")
     .split("\n")
-    .filter((l) => /wasm/.test(l) && !PANIC_MACHINERY.test(l))
-    .map((l) => l.trim().replace(/^at [\w.]+?\.wasm\./, "").replace(/ \(wasm:\/\/wasm\/[^)]*?wasm-function\[(\d+)\][^)]*\)/, " [$1]"));
+    .filter((l) => /wasm/.test(l) && !/wasm-stub/.test(l) && !PANIC_MACHINERY.test(l))
+    .map((l) =>
+      l
+        .trim()
+        // Chrome: "at partsong_omr.wasm.NAME (URL:wasm-function[N]:0x...)"
+        .replace(/^at (?:[\w.]+?\.wasm\.)?/, "")
+        .replace(/\s*\([^()]*wasm-function\[(\d+)\][^()]*\)$/, " [$1]")
+        // Safari: "<?>.wasm-function[NAME]@[wasm code]"
+        .replace(/^<\?>\.wasm-function\[(.*)\]@\[wasm code\]$/, "$1"),
+    );
   return `${build ?? "?"} build:\n${frames.join("\n")}`.slice(0, 2000);
 }
 
@@ -840,7 +859,9 @@ self.onmessage = async ({ data }) => {
     }
   } catch (e) {
     // A panic is a bug in the reader, not memory: say where (see panicText).
-    const panic = e instanceof WebAssembly.RuntimeError ? panicText() : null;
+    // Any failure, not only a trap: a panic on an encoder pool thread comes
+    // back as the pool's own error ("encoder worker N failed").
+    const panic = panicText();
     if (e instanceof WebAssembly.RuntimeError) pageReader = null;
     const msg = String(e && e.message ? e.message : e);
     post({ type: "error", id: data.id, msg: panic ? `the music reader failed: ${panic.text}` : msg, panic: !!panic, stack: panic ? rustFrames(e, panic.build) : undefined, seen: lastSeen });
