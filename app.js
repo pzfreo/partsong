@@ -623,7 +623,7 @@ function startWorker() {
           return reject(new Error(data.msg));
         }
         pending.delete(data.id);
-        data.type === "result" ? p.resolve("xml" in data ? data.xml : data) : p.reject(Object.assign(new Error(data.msg), { seen: data.seen }));
+        data.type === "result" ? p.resolve("xml" in data ? data.xml : data) : p.reject(Object.assign(new Error(data.msg), { seen: data.seen, panic: data.panic }));
       }
     };
     // A crashed worker (e.g. the phone ran out of memory) fails everything waiting
@@ -1679,8 +1679,10 @@ async function readScan() {
     // The reader ran out of memory without the phone closing the page
     // (WebAssembly: "unreachable" in Chrome, "Unreachable code should not be
     // executed" in Safari, "Out of memory"): carry on from here in low memory,
-    // as after a closed page. Already in low memory: say so plainly.
-    const outOfMemory = OUT_OF_MEMORY.test(e.message);
+    // as after a closed page. Already in low memory: say so plainly. A panic
+    // in the reader traps the same way, but the worker knows it (e.panic): a
+    // bug, which low memory wouldn't get past.
+    const outOfMemory = OUT_OF_MEMORY.test(e.message) && !e.panic;
     // For the problem log: where the read was, and the page it was on.
     const at = s.working ?? Math.max(0, s.pages.findIndex((p) => !p.xml));
     const facts = {
@@ -1706,7 +1708,7 @@ async function readScan() {
     track("read-failed");
     track(`read-failed (${deviceTag})`);
     track(`read-failed (${deviceTag}): ${failureReason(e)}${lowMemory ? " (low memory)" : ""}`);
-    if (outOfMemory) resetWorker();
+    if (outOfMemory || e.panic) resetWorker();
     // A long error ends with the actual error; show that first, since the
     // whole message can run off the bottom of a phone screen.
     const lines = e.message.trim().split("\n");
@@ -1733,7 +1735,9 @@ async function readScan() {
         ? `Page ${page} doesn't look like sheet music.\nIf it's sideways, tap ↻ on it to turn it. Otherwise retake the photo straight on, in good light, or remove it (×) and press Read music again.`
         : outOfMemory
           ? `Couldn't read page ${page}: there wasn't enough memory.\nClose other apps and browser tabs, then tap Read music to carry on from this page.`
-          : `Couldn't read page ${page}: ${why}`,
+          : e.panic
+            ? `Couldn't read page ${page}: the music reader went wrong on it, and it's been reported.\nRetaking the photo may get round it.`
+            : `Couldn't read page ${page}: ${why}`,
     );
     return;
   } finally {

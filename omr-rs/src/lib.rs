@@ -232,6 +232,31 @@ fn set_msg(s: String) {
     MSG.with(|m| *m.borrow_mut() = s);
 }
 
+// A panic aborts (panic = "abort"), which the browser reports only as
+// "unreachable", the same as running out of memory. The hook keeps the panic's
+// message and place first, for the worker to read after the trap. Running out
+// of memory doesn't come through here, so an empty message still means memory.
+static PANIC: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+#[no_mangle]
+pub extern "C" fn panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        if let Ok(mut p) = PANIC.try_lock() {
+            *p = info.to_string().chars().take(300).collect();
+        }
+    }));
+}
+
+#[no_mangle]
+pub extern "C" fn panic_ptr() -> *const u8 {
+    PANIC.try_lock().map_or(std::ptr::null(), |p| p.as_ptr())
+}
+
+#[no_mangle]
+pub extern "C" fn panic_len() -> usize {
+    PANIC.try_lock().map_or(0, |p| p.len())
+}
+
 #[no_mangle]
 pub extern "C" fn alloc(n: usize) -> *mut u8 {
     let mut v = Vec::<u8>::with_capacity(n);

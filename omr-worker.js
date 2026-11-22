@@ -323,13 +323,13 @@ async function decoderModule() {
   if (WebAssembly.validate(RELAXED_SIMD)) {
     try {
       const mod = await compileWasm("omr/partsong_omr_fused.wasm");
-      const { exports: rs } = await WebAssembly.instantiate(mod, {});
+      const rs = hooked((await WebAssembly.instantiate(mod, {})).exports);
       if (rs.decoder_fused_simd_supported() === 1) return { rs, build: "relaxed SIMD" };
     } catch (e) {
       post({ type: "log", msg: `Relaxed SIMD decoder unavailable (${e.message})` });
     }
   }
-  const { exports: rs } = await WebAssembly.instantiate(wasmModule, {});
+  const rs = hooked((await WebAssembly.instantiate(wasmModule, {})).exports);
   return { rs, build: "SIMD" };
 }
 // The exact encoder's thread count: from the app (tuned once on this device).
@@ -437,7 +437,7 @@ async function threadedModule(threads) {
     try {
       const pool = await pick("omr/partsong_omr_threads_fused.wasm");
       if (pool.exports.decoder_fused_simd_supported() === 1 && pool.exports.encoder_fused_simd_supported() === 1) {
-        return { rs: pool.exports, build: `relaxed SIMD, ${threads} threads` };
+        return { rs: hooked(pool.exports), build: `relaxed SIMD, ${threads} threads` };
       }
       await pool.close();
     } catch (e) {
@@ -445,7 +445,7 @@ async function threadedModule(threads) {
     }
   }
   const pool = await pick("omr/partsong_omr_threads.wasm");
-  return { rs: pool.exports, build: `SIMD, ${threads} threads` };
+  return { rs: hooked(pool.exports), build: `SIMD, ${threads} threads` };
 }
 async function rustDecoder() {
   if (decoderInstance) return decoderInstance;
@@ -546,6 +546,22 @@ const WIN = 320;
 let wasmModule;
 let runTimes = [];
 
+// A panic in the reader traps as "unreachable", like running out of memory;
+// its hook keeps the panic's message (see panic_hook in omr-rs/src/lib.rs).
+function hooked(rs) {
+  rs.panic_hook?.();
+  return rs;
+}
+// After a trap: the panic's message from whichever reader panicked, else "".
+function panicText() {
+  for (const rs of [pageReader, decoderInstance?.rs]) {
+    const n = rs?.panic_len?.();
+    // Its place without the build machine's folders: "homr-rs/src/....rs:12:5".
+    if (n) return new TextDecoder().decode(new Uint8Array(rs.memory.buffer, rs.panic_ptr(), n).slice()).replace(/\S*\/(homr-rs|omr-rs)\S*?\/src\//g, "$1/src/");
+  }
+  return "";
+}
+
 // The page's pixels as homr's cv2.imread sees them (RGBA, no colour conversion).
 async function pixels(bytes) {
   const bmp = await createImageBitmap(new Blob([bytes]), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
@@ -575,7 +591,7 @@ let pageReader = null;
 // page.image, and its pixels, are let go once they're in the reader, so they
 // aren't kept while segnet runs (a phone's photo: about 50 MB).
 async function openPage(page, systemsJson, packed) {
-  const rs = (pageReader ??= (await WebAssembly.instantiate(wasmModule, {})).exports);
+  const rs = (pageReader ??= hooked((await WebAssembly.instantiate(wasmModule, {})).exports));
   rs.page_close();
   const mem = () => rs.memory.buffer;
   const copyIn = (typed) => {
@@ -809,7 +825,10 @@ self.onmessage = async ({ data }) => {
       post({ type: "result", id: data.id, xml, ms });
     }
   } catch (e) {
+    // A panic is a bug in the reader, not memory: say where (see panicText).
+    const panic = e instanceof WebAssembly.RuntimeError ? panicText() : "";
     if (e instanceof WebAssembly.RuntimeError) pageReader = null;
-    post({ type: "error", id: data.id, msg: String(e && e.message ? e.message : e), seen: lastSeen });
+    const msg = String(e && e.message ? e.message : e);
+    post({ type: "error", id: data.id, msg: panic ? `the music reader failed: ${panic}` : msg, panic: !!panic, seen: lastSeen });
   }
 };

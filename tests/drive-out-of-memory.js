@@ -13,6 +13,7 @@ const $ = (id) => document.getElementById(id);
 // The reader's first page fails as Safari's does when WebAssembly runs out of memory.
 const inits = [];
 let failures = 0;
+let panics = 0; // a panic in the reader: it traps as "unreachable" too, but isn't memory
 const Real = Worker;
 window.Worker = class extends Real {
   postMessage(m, t) {
@@ -20,6 +21,11 @@ window.Worker = class extends Real {
     if (m?.type === "recognise" && failures > 0) {
       failures--;
       setTimeout(() => this.onmessage({ data: { type: "error", id: m.id, msg: "RuntimeError: Unreachable code should not be executed (evaluating 'rs.page_step()')" } }));
+      return;
+    }
+    if (m?.type === "recognise" && panics > 0) {
+      panics--;
+      setTimeout(() => this.onmessage({ data: { type: "error", id: m.id, panic: true, msg: "the music reader failed: panicked at homr-rs/src/staff.rs:1:1:\ninternal error: entered unreachable code" } }));
       return;
     }
     super.postMessage(m, t);
@@ -36,7 +42,25 @@ addPage();
 await waitFor(() => !$("recognise").disabled, 20000, "page added");
 const r = {};
 
-// Out of memory once: carried on in low memory, and read.
+// A panic in the reader: not taken for memory (no low memory, no read-out-of-memory),
+// a plain message, the reader started again, and Read music carries on.
+// (A real panic's message: tests/panic-message.mjs.)
+panics = 1;
+$("recognise").click();
+r.panic = { status: await waitFor(() => { if (!$("systems-check").hidden && !$("check-done").hidden) $("check-done").click(); return /Couldn't read/.test($("status").textContent) && $("status").textContent; }, 300000, "panic message") };
+r.panic.counted = events.filter((p) => /^read-(ok|failed|out-of-memory)/.test(p));
+$("recognise").click();
+await waitFor(() => !$("practice").hidden, 300000, "practice 3");
+r.panic.thenRead = events.filter((p) => /^read-ok \(/.test(p));
+r.panic.inits = [...inits];
+
+// Out of memory once (low memory from here on): carried on in low memory, and read.
+events.length = 0; inits.length = 0; statuses.length = 0;
+$("back").click(); await sleep(500);
+$("new-scan").click();
+await waitFor(() => !$("scan").hidden && $("pages").children.length === 0, 10000, "new scan 1");
+addPage();
+await waitFor(() => !$("recognise").disabled, 20000, "page added 1");
 failures = 1;
 $("recognise").click();
 await waitFor(() => { if (!$("systems-check").hidden && !$("check-done").hidden) $("check-done").click(); return !$("practice").hidden; }, 300000, "practice");
@@ -68,5 +92,10 @@ r.ok = r.once.carriedOn && r.once.inits.join("; ") === "exact false, noGpu false
   !r.once.counted.some((p) => p.startsWith("read-failed")) &&
   r.twice.status === "Couldn't read page 1: there wasn't enough memory.\nClose other apps and browser tabs, then tap Read music to carry on from this page." &&
   r.twice.counted.some((p) => /^read-failed \(iPad dev\): .*Unreachable code.* \(low memory\)$/.test(p)) &&
-  !r.twice.counted.some((p) => p.startsWith("read-out-of-memory")) && r.twice.thenRead.includes("read-ok (iPad dev): low memory");
+  !r.twice.counted.some((p) => p.startsWith("read-out-of-memory")) && r.twice.thenRead.includes("read-ok (iPad dev): low memory") &&
+  r.panic.status === "Couldn't read page 1: the music reader went wrong on it, and it's been reported.\nRetaking the photo may get round it." &&
+  r.panic.counted.includes("read-failed (iPad dev): internal error: entered unreachable code") &&
+  !r.panic.counted.some((p) => p.startsWith("read-out-of-memory") || p.endsWith("(low memory)")) &&
+  r.panic.inits.every((i) => i === "exact false, noGpu false") && r.panic.inits.length >= 2 &&
+  r.panic.thenRead.length > 0;
 window.result = r;
