@@ -623,7 +623,7 @@ function startWorker() {
           return reject(new Error(data.msg));
         }
         pending.delete(data.id);
-        data.type === "result" ? p.resolve("xml" in data ? data.xml : data) : p.reject(Object.assign(new Error(data.msg), { seen: data.seen, panic: data.panic }));
+        data.type === "result" ? p.resolve("xml" in data ? data.xml : data) : p.reject(Object.assign(new Error(data.msg), { seen: data.seen, panic: data.panic, rustStack: data.stack }));
       }
     };
     // A crashed worker (e.g. the phone ran out of memory) fails everything waiting
@@ -1687,7 +1687,7 @@ async function readScan() {
     const at = s.working ?? Math.max(0, s.pages.findIndex((p) => !p.xml));
     const facts = {
       stage: `${s.settings.systemsChecked ? "reading the notes" : "finding systems"}, page ${at + 1} of ${s.pages.length}`,
-      place: e.stack,
+      place: e.rustStack ?? e.stack, // a panic: the Rust functions it came through
       detail: { from: s.pages[at]?.from ?? "saved", mp: s.pages[at]?.mp, shape: s.pages[at]?.shape, seen: e.seen, rereading: s.rereading },
     };
     if (outOfMemory && !lowMemory) {

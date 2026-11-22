@@ -458,7 +458,7 @@ async function rustDecoder() {
   if (!model) throw new Error("the music reader couldn't load homr's decoder");
   const contextBytes = CONTEXT_POSITIONS * DECODER_DIM * 4;
   // Kept only once it's whole: one whose encoder failed to load was once used by the next read.
-  const d = { rs, model, context: rs.decoder_alloc(contextBytes), out: rs.decoder_alloc(MAX_SEQ_LEN * 32) };
+  const d = { rs, build, model, context: rs.decoder_alloc(contextBytes), out: rs.decoder_alloc(MAX_SEQ_LEN * 32) };
   post({ type: "log", msg: `Loaded ${MODELS[2]} in homr-rs (${build}) in ${Math.round(performance.now() - t0)} ms` });
   if (exactEncoder) {
     const t1 = performance.now();
@@ -554,12 +554,26 @@ function hooked(rs) {
 }
 // After a trap: the panic's message from whichever reader panicked, else "".
 function panicText() {
-  for (const rs of [pageReader, decoderInstance?.rs]) {
+  for (const [rs, build] of [[pageReader, "page reader"], [decoderInstance?.rs, decoderInstance?.build]]) {
     const n = rs?.panic_len?.();
     // Its place without the build machine's folders: "homr-rs/src/....rs:12:5".
-    if (n) return new TextDecoder().decode(new Uint8Array(rs.memory.buffer, rs.panic_ptr(), n).slice()).replace(/\S*\/(homr-rs|omr-rs)\S*?\/src\//g, "$1/src/");
+    if (n) return { build, text: new TextDecoder().decode(new Uint8Array(rs.memory.buffer, rs.panic_ptr(), n).slice()).replace(/\S*\/(homr-rs|omr-rs)\S*?\/src\//g, "$1/src/") };
   }
-  return "";
+  return null;
+}
+// The Rust functions a panic came through, innermost first, for the problem
+// log: a panic inside Rust's own code (e.g. "capacity overflow") names only
+// that, not our call that led there. The panic's own machinery left out, and
+// Chrome's frames shortened to "name [function index]". (Chrome keeps 10
+// frames unless told otherwise, and the machinery alone is 10.)
+Error.stackTraceLimit = 60;
+const PANIC_MACHINERY = /panicking|panic_fmt|panic_handler|rust_begin_unwind|rust_start_panic|rust_abort|rust_panic|backtrace|unwrap_failed|expect_failed|capacity_overflow|handle_error|panic_bounds_check|core\d+panicking/;
+function rustFrames(e, build) {
+  const frames = String(e.stack ?? "")
+    .split("\n")
+    .filter((l) => /wasm/.test(l) && !PANIC_MACHINERY.test(l))
+    .map((l) => l.trim().replace(/^at [\w.]+?\.wasm\./, "").replace(/ \(wasm:\/\/wasm\/[^)]*?wasm-function\[(\d+)\][^)]*\)/, " [$1]"));
+  return `${build ?? "?"} build:\n${frames.join("\n")}`.slice(0, 2000);
 }
 
 // The page's pixels as homr's cv2.imread sees them (RGBA, no colour conversion).
@@ -826,9 +840,9 @@ self.onmessage = async ({ data }) => {
     }
   } catch (e) {
     // A panic is a bug in the reader, not memory: say where (see panicText).
-    const panic = e instanceof WebAssembly.RuntimeError ? panicText() : "";
+    const panic = e instanceof WebAssembly.RuntimeError ? panicText() : null;
     if (e instanceof WebAssembly.RuntimeError) pageReader = null;
     const msg = String(e && e.message ? e.message : e);
-    post({ type: "error", id: data.id, msg: panic ? `the music reader failed: ${panic}` : msg, panic: !!panic, seen: lastSeen });
+    post({ type: "error", id: data.id, msg: panic ? `the music reader failed: ${panic.text}` : msg, panic: !!panic, stack: panic ? rustFrames(e, panic.build) : undefined, seen: lastSeen });
   }
 };
