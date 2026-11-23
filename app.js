@@ -1832,7 +1832,7 @@ async function openFiles(files) {
       }
       let text;
       try {
-        text = await musicXmlText(f);
+        text = withoutHiddenParts(await musicXmlText(f));
         parsePage(text);
       } catch {
         throw new Error(`${f.name || "it"} isn't a Partsong score, a PDF or a MusicXML file`);
@@ -1882,6 +1882,26 @@ async function musicXmlText(f) {
   };
   const root = files.has("META-INF/container.xml") && (await read("META-INF/container.xml")).match(/full-path="([^"]+)"/)?.[1];
   return read(root || [...files.keys()].find((k) => !k.startsWith("META-INF/") && /\.(xml|musicxml)$/i.test(k)));
+}
+
+// Parts the score keeps but doesn't print (staff-details print-object="no"):
+// CPDL's LilyPond editions carry each voice on a hidden staff of its own as
+// well as the SA/TB staves printed. Drawn, they'd make six staves where the
+// PDF has two, and parts Partsong can't sort out. Left as is if every part is hidden.
+function withoutHiddenParts(text) {
+  if (!text.includes('print-object="no"')) return text;
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  const parts = [...doc.querySelectorAll("part")];
+  const hidden = parts.filter((p) => {
+    const details = [...(p.querySelector("measure")?.querySelectorAll("staff-details") ?? [])];
+    return details.length && details.every((d) => d.getAttribute("print-object") === "no");
+  });
+  if (!hidden.length || hidden.length === parts.length) return text;
+  for (const p of hidden) {
+    doc.querySelector(`score-part[id="${CSS.escape(p.id)}"]`)?.remove();
+    p.remove();
+  }
+  return new XMLSerializer().serializeToString(doc);
 }
 
 // Imports never overwrite: a score already here (same id or same name) is
@@ -2518,6 +2538,8 @@ function renderFollow() {
   pageViews = [];
   const images = current.images ?? [];
   $("follow").hidden = !images.length || !score.measures.some((m) => m.box);
+  // An imported MusicXML file wasn't read: its notes are the editor's own.
+  $("read-note").hidden = !images.length;
   $("photo-list").replaceChildren(
     ...images.flatMap((blob, p) => {
       const div = document.createElement("div");

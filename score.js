@@ -43,7 +43,11 @@ export function parsePage(xmlText, { restaff = true } = {}) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) throw new Error("Not valid MusicXML");
   const title = doc.querySelector("work-title, movement-title")?.textContent?.trim() || "";
+  // A part's name, from an imported file ("Cantus", "Alto"); the reader names
+  // every part "Voice" or "Piano", which says nothing.
+  const partNames = new Map([...doc.querySelectorAll("score-part")].map((sp) => [sp.id, sp.querySelector("part-name")?.textContent.trim() ?? ""]));
   const parts = [...doc.querySelectorAll("score-partwise > part")].map((part) => {
+    const name = partNames.get(part.id);
     let divisions = 1;
     let staves = 1;
     let timeLength = 4;
@@ -123,7 +127,7 @@ export function parsePage(xmlText, { restaff = true } = {}) {
       if (lowers.size) [staves, restaffed] = [2, true];
     }
     for (let staff = 1; staff <= staves; staff++) placeNoteheads(measures, staff);
-    return { staves, measures, clef, restaffed };
+    return { staves, measures, clef, restaffed, name: name && !/^(Voice|Piano)$/.test(name) ? name : "" };
   });
   return { title, parts };
 }
@@ -559,6 +563,7 @@ export function buildScore(pages, { legacyAlign = false, numbers = true } = {}) 
       const info = partInfo.get(part.key) ?? { key: part.key, staves: part.staves, order: [], clef: part.clef };
       info.staves = Math.max(info.staves, part.staves);
       info.restaffed ||= !!part.restaffed;
+      info.name ||= part.name;
       info.order.push(idx / Math.max(1, page.parts.length - 1));
       partInfo.set(part.key, info);
     });
@@ -710,8 +715,11 @@ export function buildScore(pages, { legacyAlign = false, numbers = true } = {}) 
   // double the voices by default.
   const singing = built.filter((b) => b.info.staves === 1 && b.partLines.length === 1);
   const piano = built.filter((b) => b.info.staves > 1 && !b.info.key.startsWith("1#"));
+  // The file's own names for the voices, if it gives each a different one.
+  const own = singing.map((b) => b.info.name);
+  const named = own.every(Boolean) && new Set(own).size === own.length;
   if (singing.length >= 2 && piano.length) {
-    const names = singing.length === 4 ? ["Soprano", "Alto", "Tenor", "Bass"] : singing.map((_, i) => `Voice ${i + 1}`);
+    const names = named ? own : singing.length === 4 ? ["Soprano", "Alto", "Tenor", "Bass"] : singing.map((_, i) => `Voice ${i + 1}`);
     for (const b of built) {
       if (singing.includes(b)) {
         const line = { ...b.partLines[0], label: names[singing.indexOf(b)], fixedLabel: true };
@@ -728,7 +736,7 @@ export function buildScore(pages, { legacyAlign = false, numbers = true } = {}) 
   } else if (singing.length >= 2 && singing.length === built.length) {
     // Only one-line parts (e.g. a melody, with harmony staves on some systems):
     // number them rather than call each one "Solo".
-    singing.forEach((b, i) => lines.push({ ...b.partLines[0], label: `Voice ${i + 1}` }));
+    singing.forEach((b, i) => lines.push({ ...b.partLines[0], label: named ? own[i] : `Voice ${i + 1}`, fixedLabel: named }));
   } else for (const b of built) lines.push(...labelLines(b.partLines, b.info, built.length));
   if (lines.length === 4 && lines.every((l) => !l.fixedLabel)) {
     ["Soprano", "Alto", "Tenor", "Bass"].forEach((name, i) => (lines[i].label = name));
