@@ -40,9 +40,11 @@ const deviceKind = /iPhone|iPod/.test(ua) ? "iPhone" : iDevice ? "iPad" : /Andro
 const deviceTag = `${deviceKind} ${SHOWN_VERSION}`;
 
 // where: the file and line it was thrown from, for uncaught errors ("app.js:2848").
-function showError(message, where = "", stack = "") {
+// detail: the error's kind, for one with no stack (Safari's DOMExceptions,
+// "Internal error" in practice: nothing said where it came from).
+function showError(message, where = "", stack = "", detail = {}) {
   remember(recentErrors, message, 10);
-  report("error", message, { place: stack || where });
+  report("error", message, { place: stack || where, detail: { ...detail, recent: recentActions() } });
   // Counted once per kind of error a visit, as "error (Android): …".
   const reason = failureReason(message) + (where && ` @ ${where}`);
   showError.counted ??= new Set();
@@ -74,7 +76,23 @@ window.addEventListener("error", (e) => {
   const file = e.filename?.split("/").at(-1).split("?")[0];
   showError(e.message, whereFrom(e.error?.stack) || (file ? `${file}:${e.lineno}` : ""), e.error?.stack);
 });
-window.addEventListener("unhandledrejection", (e) => showError(e.reason?.message ?? String(e.reason), whereFrom(e.reason?.stack), e.reason?.stack));
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  showError(r?.message ?? String(r), whereFrom(r?.stack), r?.stack, { name: r?.name, type: r?.constructor?.name, code: r?.code });
+});
+// What the singer did last (buttons pressed, events counted), with seconds
+// before now, so an error with no stack can be placed: "play-btn 3s".
+const actions = [];
+const noteAction = (what) => {
+  actions.push([Date.now(), String(what).slice(0, 60)]);
+  if (actions.length > 12) actions.shift();
+};
+const recentActions = () => actions.map(([t, a]) => `${a} ${Math.round((Date.now() - t) / 1000)}s`).join(", ");
+document.addEventListener("click", (e) => {
+  // Only ids: an element's text could be a score's title, which is never sent.
+  const el = e.target.closest?.("[id]");
+  if (el) noteAction(el.id);
+}, true);
 window.reportError ??= (e) => showError(e?.message ?? String(e));
 const OSMD_URL = "lib/opensheetmusicdisplay@2.2.0/build/opensheetmusicdisplay.min.js"; // scripts/fetch-libs.sh
 const NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -944,6 +962,7 @@ function lastCrumbs(id) {
 }
 
 function track(name, title = name, tries = 30) {
+  if (tries === 30) noteAction(name);
   try {
     if (window.goatcounter?.count) return window.goatcounter.count({ path: name, title, event: true });
   } catch {
