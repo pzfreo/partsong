@@ -43,6 +43,8 @@
             "image/*",
             ".musicxml",
             ".xml",
+            ".mxl",
+            "application/vnd.recordare.musicxml",
             "application/vnd.recordare.musicxml+xml"
           ]
         }

@@ -1830,14 +1830,15 @@ async function openFiles(files) {
         pdfs.push(f);
         continue;
       }
-      const text = await f.text();
+      let text;
       try {
+        text = await musicXmlText(f);
         parsePage(text);
       } catch {
         throw new Error(`${f.name || "it"} isn't a Partsong score, a PDF or a MusicXML file`);
       }
       xmls.push(text);
-      name ||= f.name.replace(/\.(musicxml|xml)$/i, "");
+      name ||= f.name.replace(/\.(musicxml|xml|mxl)$/i, "");
     }
     // An ordinary PDF is sheet music to read: its pages, to look over before
     // Read music (step 1 of 3, as with photos).
@@ -1851,6 +1852,36 @@ async function openFiles(files) {
   } catch (err) {
     $("library-status").textContent = `Couldn't open that file: ${err.message}`;
   }
+}
+
+// A MusicXML file's text. A .mxl file (compressed MusicXML: what CPDL and
+// MuseScore usually offer) is a zip; its score is the file that
+// META-INF/container.xml names, or else its first .xml or .musicxml file.
+async function musicXmlText(f) {
+  const b = new Uint8Array(await f.arrayBuffer());
+  if (b[0] !== 0x50 || b[1] !== 0x4b) return new TextDecoder().decode(b); // not "PK"
+  const v = new DataView(b.buffer);
+  let end = b.length - 22;
+  while (end >= 0 && v.getUint32(end, true) !== 0x06054b50) end--;
+  if (end < 0) throw new Error("not a zip");
+  const files = new Map();
+  for (let at = v.getUint32(end + 16, true), n = v.getUint16(end + 10, true); n-- > 0; ) {
+    const nameLen = v.getUint16(at + 28, true);
+    const name = new TextDecoder().decode(b.subarray(at + 46, at + 46 + nameLen));
+    files.set(name, { method: v.getUint16(at + 10, true), size: v.getUint32(at + 20, true), local: v.getUint32(at + 42, true) });
+    at += 46 + nameLen + v.getUint16(at + 30, true) + v.getUint16(at + 32, true);
+  }
+  const read = async (name) => {
+    const e = files.get(name);
+    if (!e) throw new Error(`${name} missing`);
+    const start = e.local + 30 + v.getUint16(e.local + 26, true) + v.getUint16(e.local + 28, true);
+    const data = b.subarray(start, start + e.size);
+    if (e.method === 0) return new TextDecoder().decode(data);
+    if (e.method !== 8) throw new Error("unknown compression");
+    return new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
+  };
+  const root = files.has("META-INF/container.xml") && (await read("META-INF/container.xml")).match(/full-path="([^"]+)"/)?.[1];
+  return read(root || [...files.keys()].find((k) => !k.startsWith("META-INF/") && /\.(xml|musicxml)$/i.test(k)));
 }
 
 // Imports never overwrite: a score already here (same id or same name) is
