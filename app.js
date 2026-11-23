@@ -639,7 +639,10 @@ function startWorker() {
   // A reader that can't start is reported by the read that waits for it
   // (opening the scan screen starts it with nobody waiting: that showed its error raw).
   workerReady.catch(() => {});
-  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, noGpu: lowMemory, ios: iDevice, threads: tunedThreads(), gpu: tunedGpu(), memoryMax: memoryMaxTest() });
+  // Low memory: homr-rs's encoder for its memory, plainly (fast) unless ?exact=1.
+  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, plain: lowMemory && !exactEncoder(), noGpu: lowMemory,
+    // Test switch (?strictsimd): the reader build without relaxed SIMD, as Safari has.
+    strictSimd: new URLSearchParams(location.search).has("strictsimd"), ios: iDevice, threads: tunedThreads(), gpu: tunedGpu(), memoryMax: memoryMaxTest() });
 }
 
 // The exact encoder's thread count, measured once on this device (see tune()
@@ -1105,7 +1108,8 @@ const reloadedScan = (() => {
 // the page closed at 820 MB as iOS would: read at the second attempt in 3
 // runs of 3 (about 30 s; peak about 715 MB), where the usual reader was
 // closed every time and never finished.
-let lowMemory = false;
+// Test switch (?lowmem): read in low memory from the start, as after a closed page.
+let lowMemory = new URLSearchParams(location.search).has("lowmem");
 async function resumeUnfinished() {
   // The list, then only the scan to carry on with: this runs just after a
   // phone has closed the page for using too much memory.

@@ -300,6 +300,10 @@ let decoderInstance;
 // Test switch: homr's encoder in homr-rs too (bit-exact with native homr, on
 // the CPU) instead of onnxruntime-web (GPU where available, not exact).
 let exactEncoder = false;
+// Low memory: homr-rs's encoder for its smaller memory, not its exactness.
+// Without relaxed SIMD (Safari) exact is the slow path (simulator: ~4 s a
+// staff); a plain multiply-add is ~13x faster, its results off by ~1e-6.
+let plainEncoder = false;
 const IMAGE_VALUES = 256 * 1280;
 // A module using relaxed SIMD's i32x4.relaxed_madd... (onnxruntime-web's check).
 const RELAXED_SIMD = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 19, 1, 17, 0, 65, 1, 253, 15, 65, 2, 253, 15, 65, 3, 253, 15, 253, 147, 2, 11]);
@@ -313,14 +317,18 @@ async function decoderModule() {
   // How many: what tune() measured on this device, else 4 (on an Android
   // phone 4 threads took 946 ms a staff and 8 took 1668 ms).
   const threads = encoderThreads || Math.min(4, navigator.hardwareConcurrency || 1);
-  if (exactEncoder && self.crossOriginIsolated && threads > 1) {
+  // Plain multiply-add (low memory, no relaxed SIMD: Safari) runs on one
+  // thread: there the work is too small for the pool's hand-offs (simulator
+  // Safari, a staff: 1.5 s on the single-thread build, 4.6 s on 4 threads).
+  const plainHere = plainEncoder && (strictSimd || !WebAssembly.validate(RELAXED_SIMD));
+  if (exactEncoder && self.crossOriginIsolated && threads > 1 && !plainHere) {
     try {
       return await threadedModule(threads);
     } catch (e) {
       post({ type: "log", msg: `Threaded encoder unavailable (${e.message})` });
     }
   }
-  if (WebAssembly.validate(RELAXED_SIMD)) {
+  if (!strictSimd && WebAssembly.validate(RELAXED_SIMD)) {
     try {
       const mod = await compileWasm("omr/partsong_omr_fused.wasm");
       const rs = hooked((await WebAssembly.instantiate(mod, {})).exports);
@@ -352,7 +360,7 @@ async function tune() {
   const bytes = await modelBytes(MODELS[1]);
   const image = new Float32Array(IMAGE_VALUES);
   for (let i = 0; i < image.length; i++) image[i] = ((i * 2654435761) >>> 0) / 4294967296; // fixed pseudo-random pixels
-  let fused = WebAssembly.validate(RELAXED_SIMD);
+  let fused = !strictSimd && WebAssembly.validate(RELAXED_SIMD);
   const file = () => (fused ? "omr/partsong_omr_threads_fused.wasm" : "omr/partsong_omr_threads.wasm");
   let mod = await compileWasm(file());
   const ms = {};
@@ -433,7 +441,7 @@ async function threadedModule(threads) {
     const pool = await EncoderPool.create(mod, { threads });
     return pool;
   };
-  if (WebAssembly.validate(RELAXED_SIMD)) {
+  if (!strictSimd && WebAssembly.validate(RELAXED_SIMD)) {
     try {
       const pool = await pick("omr/partsong_omr_threads_fused.wasm");
       if (pool.exports.decoder_fused_simd_supported() === 1 && pool.exports.encoder_fused_simd_supported() === 1) {
@@ -467,8 +475,10 @@ async function rustDecoder() {
     d.encoder = rs.encoder_load(ep, en);
     rs.decoder_free(ep, en);
     if (!d.encoder) throw new Error("the music reader couldn't load homr's encoder");
+    // 1 only where it applies (no relaxed SIMD); one setting for all its threads.
+    const plain = (d.plain = plainEncoder && rs.encoder_set_unfused?.(1) === 1);
     d.image = rs.decoder_alloc(IMAGE_VALUES * 4);
-    post({ type: "log", msg: `Loaded ${MODELS[1]} in homr-rs (${build}, exact) in ${Math.round(performance.now() - t1)} ms` });
+    post({ type: "log", msg: `Loaded ${MODELS[1]} in homr-rs (${build}, ${plain ? "plain multiply-add" : "exact"}) in ${Math.round(performance.now() - t1)} ms` });
     // The same encoder on the GPU, with the same results: it tests itself
     // first and otherwise (or if a staff trips its checks) uses the CPU one.
     if (self.navigator.gpu && !noGpuSetting && encoderGpu !== false) {
@@ -784,9 +794,12 @@ async function recognise(page, systemsJson, packed) {
 }
 
 // noGpu (tests, comparisons): run every model on WASM.
-async function init(noGpu, exact) {
+let strictSimd = false; // test switch: the build Safari gets (no relaxed SIMD)
+async function init(noGpu, exact, plain, strict) {
+  strictSimd = !!strict;
   noGpuSetting = noGpu;
   exactEncoder = !!exact;
+  plainEncoder = !!plain;
   ort = await import(ORT_URL + "ort.webgpu.min.mjs");
   ort.env.wasm.wasmPaths = ORT_URL;
   ort.env.wasm.numThreads = self.crossOriginIsolated
@@ -812,7 +825,7 @@ self.onmessage = async ({ data }) => {
       if (data.memoryMax > 0) refuseAbove = data.memoryMax;
       if (Number.isInteger(data.threads) && data.threads > 0) encoderThreads = data.threads;
       if (typeof data.gpu === "boolean") encoderGpu = data.gpu;
-      ready ??= init(!!data.noGpu, !!data.exact);
+      ready ??= init(!!data.noGpu, !!data.exact, !!data.plain, !!data.strictSimd);
       await ready;
     } else if (data.type === "tune") {
       await ready;
@@ -849,7 +862,7 @@ self.onmessage = async ({ data }) => {
       const ms = Math.round(performance.now() - t0);
       const names = [...sessionIds.keys()];
       const parts = names.map((n) => `${n.split("_")[0]} ${Math.round(runTimes[sessionIds.get(n)]?.ms ?? 0)} ms/${runTimes[sessionIds.get(n)]?.calls ?? 0} calls`);
-      const exactLabel = `encoder+decoder (homr-rs, exact${decoderInstance?.gpu ? ", GPU encoder" : ""})`;
+      const exactLabel = `encoder+decoder (homr-rs, ${decoderInstance?.plain ? "plain" : "exact"}${decoderInstance?.gpu ? ", GPU encoder" : ""})`;
       if (runTimes.decoder) parts.push(`${exactEncoder ? exactLabel : "decoder"} ${Math.round(runTimes.decoder.ms)} ms/${runTimes.decoder.calls} calls`);
       if (runTimes.encoderMs) parts.push(`of which GPU encoder ${Math.round(runTimes.encoderMs)} ms`);
       if (runTimes.gpuFallbacks) parts.push(`${runTimes.gpuFallbacks} staffs on the CPU encoder after GPU checks`);

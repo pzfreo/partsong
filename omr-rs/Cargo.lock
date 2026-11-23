@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "homr-rs"
 version = "0.1.0"
-source = "git+https://github.com/pzfreo/homr-rs?rev=f6309104e3582bae8df22669f0325e7fd1a7ab32#f6309104e3582bae8df22669f0325e7fd1a7ab32"
+source = "git+https://github.com/pzfreo/homr-rs?rev=0eca1d19652ec8ebef3ba0347096385c02d0b5d3#0eca1d19652ec8ebef3ba0347096385c02d0b5d3"
 dependencies = [
  "libm",
  "serde_json",

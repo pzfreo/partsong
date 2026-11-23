@@ -4,6 +4,7 @@
 # .mxl to get it). Needs the local server (http://localhost:8765).
 #   scripts/corpus-check.sh [NAME ...]   (default: every PDF there)
 # Results go to $OUT (default /tmp/partsong-corpus): NAME.json, and a summary.
+# QUERY: test switches for the page, e.g. QUERY="?lowmem&strictsimd".
 cd "$(dirname "$0")/.." || exit 1
 OUT=${OUT:-/tmp/partsong-corpus}; mkdir -p "$OUT"
 [ $# -eq 0 ] && set -- $(ls testdata/corpus/*.pdf | grep -v partsong | xargs -n1 basename | sed 's/\.pdf$//')
@@ -16,7 +17,7 @@ for n in "$@"; do
   for try in 1 2; do
     pkill -f "remote-debugging-port=9333"
     while pgrep -f "remote-debugging-port=9333" > /dev/null; do sleep 1; done
-    node scripts/headless-test.mjs http://localhost:8765/index.html "$OUT/$n.json" 1850 "$OUT/drive-$n.js" > "$OUT/$n.log" 2>&1
+    node scripts/headless-test.mjs "http://localhost:8765/index.html$QUERY" "$OUT/$n.json" 1850 "$OUT/drive-$n.js" > "$OUT/$n.log" 2>&1
     [ -f "$OUT/$n.json" ] && break
   done
 done

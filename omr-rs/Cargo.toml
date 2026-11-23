@@ -9,7 +9,7 @@ license = "AGPL-3.0-only"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-homr-rs = { git = "https://github.com/pzfreo/homr-rs", rev = "f6309104e3582bae8df22669f0325e7fd1a7ab32" }
+homr-rs = { git = "https://github.com/pzfreo/homr-rs", rev = "0eca1d19652ec8ebef3ba0347096385c02d0b5d3" }
 
 [features]
 # homr-rs's multithreaded exact encoder (shared memory; nightly build-std).
