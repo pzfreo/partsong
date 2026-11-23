@@ -1886,8 +1886,10 @@ async function musicXmlText(f) {
     if (e.method !== 8) throw new Error("unknown compression");
     return new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
   };
-  const root = files.has("META-INF/container.xml") && (await read("META-INF/container.xml")).match(/full-path="([^"]+)"/)?.[1];
-  return read(root || [...files.keys()].find((k) => !k.startsWith("META-INF/") && /\.(xml|musicxml)$/i.test(k)));
+  const named = files.has("META-INF/container.xml") && (await read("META-INF/container.xml")).match(/full-path="([^"]+)"/)?.[1];
+  // (The name is XML text: "Ave &amp; Maria.xml".)
+  const root = named && new DOMParser().parseFromString(`<a>${named}</a>`, "application/xml").documentElement.textContent;
+  return read(files.has(root) ? root : [...files.keys()].find((k) => !k.startsWith("META-INF/") && /\.(xml|musicxml)$/i.test(k)));
 }
 
 // Parts the score keeps but doesn't print (staff-details print-object="no"):
@@ -1898,9 +1900,14 @@ function withoutHiddenParts(text) {
   if (!text.includes('print-object="no"')) return text;
   const doc = new DOMParser().parseFromString(text, "application/xml");
   const parts = [...doc.querySelectorAll("part")];
+  // Hidden throughout, every staff of it: not a piano's hidden left hand, nor
+  // a part hidden only while it rests at the start.
   const hidden = parts.filter((p) => {
-    const details = [...(p.querySelector("measure")?.querySelectorAll("staff-details") ?? [])];
-    return details.length && details.every((d) => d.getAttribute("print-object") === "no");
+    const first = p.querySelector("measure");
+    const staves = Number(first?.querySelector("attributes > staves")?.textContent) || 1;
+    const off = new Set([...(first?.querySelectorAll("staff-details") ?? [])].filter((d) => d.getAttribute("print-object") === "no").map((d) => d.getAttribute("number") || "1"));
+    const shownLater = [...p.querySelectorAll("staff-details")].some((d) => d.getAttribute("print-object") !== "no");
+    return off.size >= staves && !shownLater;
   });
   if (!hidden.length || hidden.length === parts.length) return text;
   for (const p of hidden) {

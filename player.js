@@ -38,7 +38,7 @@ export class Player {
   }
 
   setTempo(bpm) {
-    const at = this.playing ? this.offset() : null;
+    const at = this.playing ? this.offset(Math.min(this.lastHeard ?? Infinity, this.ctx.currentTime)) : null;
     this.bpm = bpm;
     if (at != null) this.play(this.segments, at, this.loop);
   }
@@ -72,7 +72,7 @@ export class Player {
     return (this.lastHeard = Math.max(this.lastHeard ?? -Infinity, t - Math.min(0.3, this.ctx.outputLatency || 0)));
   }
 
-  position(time) {
+  position(time = this.playing ? this.lastHeard ?? undefined : undefined) {
     // Not before the start: during the short lead-in, offset() is slightly
     // less, which after a repeat would point at the end of the previous pass.
     const o = Math.max(this.startOffset ?? 0, this.offset(time));
@@ -124,7 +124,9 @@ export class Player {
 
   stop(notify = true) {
     if (!this.playing) return;
-    this.startOffset = this.offset();
+    // From what was heard (as shown), not what the audio clock has reached: a
+    // pause near a bar line showed one bar and resumed from the next.
+    this.startOffset = Math.max(0, this.offset(Math.min(this.lastHeard ?? Infinity, this.ctx.currentTime)));
     this.playing = false;
     clearInterval(this.timer);
     cancelAnimationFrame(this.raf);

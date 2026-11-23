@@ -724,8 +724,9 @@ export function buildScore(pages, { legacyAlign = false, numbers = true } = {}) 
       if (singing.includes(b)) {
         const line = { ...b.partLines[0], label: names[singing.indexOf(b)], fixedLabel: true };
         // A tenor part in treble clef is always the octave-lower treble clef,
-        // whose little 8 the reader doesn't report.
-        if (line.label === "Tenor" && b.info.clef === "G") line.notes = line.notes.map((n) => ({ ...n, midi: n.midi - 12 }));
+        // whose little 8 the reader doesn't report. (A file naming its own
+        // parts was written by notation software, which keeps the 8.)
+        if (!named && line.label === "Tenor" && b.info.clef === "G") line.notes = line.notes.map((n) => ({ ...n, midi: n.midi - 12 }));
         lines.push(line);
       }
       else if (piano.includes(b)) {
