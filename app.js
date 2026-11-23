@@ -1798,6 +1798,10 @@ async function readScan() {
   else renderLibrary();
 }
 
+// Phones' pickers grey out files of a type they don't know (.mxl, perhaps
+// .musicxml), and there's no phone to check them on: on a phone every file can
+// be picked, and openFiles says if one isn't a score, a PDF or MusicXML.
+if (iDevice || /Android/.test(ua)) $("open-xml").removeAttribute("accept");
 $("open-xml").onchange = async (e) => {
   const files = [...e.target.files];
   e.target.value = "";
