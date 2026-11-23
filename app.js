@@ -3374,10 +3374,16 @@ function readBarBox(view, i) {
   const unit = 10 * view.osmd.zoom; // OSMD units -> px (osmd is set: staves were found)
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   let lead = 0; // clef/key/time at the start of a system
+  const at = new Map(); // where each note in the bar starts: beat -> x
   for (const m of staves) {
     const ps = m?.PositionAndShape;
     if (!ps) continue;
     lead = Math.max(lead, m.beginInstructionsWidth || 0);
+    for (const e of m.staffEntries ?? []) {
+      const beat = 4 * (e.relInMeasureTimestamp?.RealValue ?? NaN);
+      const x = e.PositionAndShape?.AbsolutePosition?.x;
+      if (Number.isFinite(beat) && Number.isFinite(x)) at.set(beat, Math.min(at.get(beat) ?? Infinity, x));
+    }
     x0 = Math.min(x0, ps.AbsolutePosition.x + ps.BorderLeft);
     x1 = Math.max(x1, ps.AbsolutePosition.x + ps.BorderRight);
     y0 = Math.min(y0, ps.AbsolutePosition.y + ps.BorderTop);
@@ -3388,7 +3394,8 @@ function readBarBox(view, i) {
   const svg = view.div.querySelector("svg");
   const ox = svg ? svg.getBoundingClientRect().left - view.div.getBoundingClientRect().left : 0;
   const oy = svg ? svg.getBoundingClientRect().top - view.div.getBoundingClientRect().top : 0;
-  return { x: ox + x0 * unit, y: oy + y0 * unit - pad, w: (x1 - x0) * unit, h: (y1 - y0) * unit + 2 * pad, lead: lead * unit };
+  const stops = [...at].sort((a, b) => a[0] - b[0]).map(([beat, x]) => [beat, ox + x * unit]);
+  return { x: ox + x0 * unit, y: oy + y0 * unit - pad, w: (x1 - x0) * unit, h: (y1 - y0) * unit + 2 * pad, lead: lead * unit, stops };
 }
 
 function place(el, { x, y, w, h }) {
@@ -3409,8 +3416,16 @@ function followRead(beat, playing = true) {
     if (playing) keepInView(view.bar);
   }
   if (!playing) return;
-  const from = box.x + box.lead;
-  const x = from + ((box.w - box.lead) * Math.min(1, Math.max(0, beat - bar.start))) / bar.length;
+  // From note to note as each sounds (notes aren't evenly spaced: moving
+  // evenly through the bar ran ahead, fell behind and jumped at the bar line).
+  const along = Math.min(bar.length, Math.max(0, beat - bar.start));
+  const points = [[0, box.x + box.lead], ...box.stops.filter(([b, x]) => b > 0 && b < bar.length && x > box.x + box.lead), [bar.length, box.x + box.w]];
+  if (box.stops[0]?.[0] === 0) points[0][1] = Math.max(points[0][1], box.stops[0][1]);
+  for (let k = 1; k < points.length; k++) points[k][1] = Math.max(points[k][1], points[k - 1][1]); // only ever forward
+  const next = points.findIndex(([b]) => b > along);
+  const i = Math.max(0, (next === -1 ? points.length - 1 : next) - 1);
+  const [[b0, x0], [b1, x1]] = [points[i], points[i + 1] ?? points[i]];
+  const x = b1 > b0 ? x0 + ((x1 - x0) * (along - b0)) / (b1 - b0) : x0;
   place(view.playhead, { x: x - 1.5, y: box.y, w: 3, h: box.h });
 }
 

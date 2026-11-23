@@ -47,19 +47,30 @@ export class Player {
   // ({from, to}), in order: with repeats, the same stretch can come twice.
   // offset() is how far into them playback is; position() is where that is
   // in the score.
-  offset() {
+  offset(time = this.ctx?.currentTime) {
     if (!this.playing) return this.startOffset ?? 0;
     // A loop's next pass is scheduled a second before it sounds (see
     // schedule): until it does, this is where the pass still sounding is.
-    const pass = this.prev && this.ctx.currentTime < this.startTime ? this.prev : this;
+    const pass = this.prev && time < this.startTime ? this.prev : this;
     if (pass === this) this.prev = null;
-    return pass.startOffset + ((this.ctx.currentTime - pass.startTime) * this.bpm) / 60;
+    return pass.startOffset + ((time - pass.startTime) * this.bpm) / 60;
   }
 
-  position() {
+  // The audio time being heard now, for the display: the audio clock moves in
+  // steps (on Android, tens of milliseconds at a time), which made the
+  // playhead jerk; the output timestamp, carried on by the page's own clock,
+  // moves smoothly and allows for the speaker's delay. Never goes back.
+  heardTime() {
+    const ts = this.ctx.getOutputTimestamp?.();
+    let t = ts?.contextTime > 0 && ts.performanceTime > 0 ? ts.contextTime + (performance.now() - ts.performanceTime) / 1000 : this.ctx.currentTime;
+    if (!(t <= this.ctx.currentTime + 0.1)) t = this.ctx.currentTime; // a bad timestamp
+    return (this.lastHeard = Math.max(this.lastHeard ?? -Infinity, t));
+  }
+
+  position(time) {
     // Not before the start: during the short lead-in, offset() is slightly
     // less, which after a repeat would point at the end of the previous pass.
-    const o = Math.max(this.startOffset ?? 0, this.offset());
+    const o = Math.max(this.startOffset ?? 0, this.offset(time));
     const seg = this.segments?.findLast((s) => s.at <= o + 1e-6) ?? this.segments?.[0];
     if (!seg) return 0;
     return Math.min(seg.to, seg.from + Math.max(0, o - seg.at));
@@ -69,6 +80,7 @@ export class Player {
     this.ensureContext();
     this.stop(false);
     this.ctx.resume();
+    this.lastHeard = null;
     let at = 0;
     this.segments = segments.map((s) => {
       const seg = { ...s, at };
@@ -89,7 +101,7 @@ export class Player {
       if (!this.playing) return;
       this.raf = requestAnimationFrame(frame);
       try {
-        this.onPosition?.(this.position());
+        this.onPosition?.(this.position(this.heardTime()));
       } catch (e) {
         reportError(e);
       }
