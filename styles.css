@@ -212,6 +212,8 @@ a.button { text-decoration: none; color: inherit; }
 body.marking .photo-list .bar { display: none; }
 body.marking .transport { display: none; }
 select { min-height: 40px; font: inherit; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+.open-musicxml { margin: 10px 0 0; }
+.open-musicxml .link { cursor: pointer; }
 .link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; font-weight: 400; }
 .photo-list .mark { fill: var(--gold); fill-opacity: 0.16; stroke: var(--gold); stroke-opacity: 0.6; stroke-width: 4; }
 /* Check and fix systems: red where a system ends, dotted between the staves of one. */

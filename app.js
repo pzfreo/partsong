@@ -1801,12 +1801,14 @@ async function readScan() {
 // Phones' pickers grey out files of a type they don't know (.mxl, perhaps
 // .musicxml), and there's no phone to check them on: on a phone every file can
 // be picked, and openFiles says if one isn't a score, a PDF or MusicXML.
-if (iDevice || /Android/.test(ua)) $("open-xml").removeAttribute("accept");
-$("open-xml").onchange = async (e) => {
-  const files = [...e.target.files];
-  e.target.value = "";
-  if (files.length) openFiles(files);
-};
+for (const id of ["open-xml", "open-musicxml"]) {
+  if (iDevice || /Android/.test(ua)) $(id).removeAttribute("accept");
+  $(id).onchange = async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (files.length) openFiles(files);
+  };
+}
 
 // Score files (shared from Partsong) and MusicXML, from the picker or the
 // share sheet; an ordinary PDF starts a new scan.
@@ -1836,7 +1838,7 @@ async function openFiles(files) {
       }
       let text;
       try {
-        text = withoutHiddenParts(await musicXmlText(f));
+        text = withoutFontSymbols(withoutHiddenParts(await musicXmlText(f)));
         parsePage(text);
       } catch {
         throw new Error(`${f.name || "it"} isn't a Partsong score, a PDF or a MusicXML file`);
@@ -1907,6 +1909,11 @@ function withoutHiddenParts(text) {
   }
   return new XMLSerializer().serializeToString(doc);
 }
+
+// Finale writes some lyric marks (elisions) as its music font's own symbols,
+// in Unicode's private use area: no ordinary font has them, so they'd show as
+// boxes ("nar□□", a Catalan carol from CPDL).
+const withoutFontSymbols = (text) => text.replace(/[\uE000-\uF8FF]/g, "");
 
 // Imports never overwrite: a score already here (same id or same name) is
 // kept, and the new one gets a fresh id and a numbered name, "Title (2)".
@@ -3505,7 +3512,10 @@ async function renderRead() {
       const sheet = readViews.length;
       try {
         await osmd.load(numberBars(xml, score.measures.find((b) => b.sheet === sheet)?.number ?? 1));
-        osmd.zoom = 0.6;
+        // An imported file is drawn like its printed page, scaled to the
+        // screen: four bars a line, as CPDL's PDF has, not two. A score the
+        // app read keeps the larger size, to check its notes by.
+        osmd.zoom = entry.images?.length ? 0.6 : Math.min(1, ($("osmd").clientWidth || innerWidth - 32) / 1100);
         osmd.render();
       } catch (e) {
         // One page the viewer can't draw shouldn't hide the others.
