@@ -56,15 +56,20 @@ export class Player {
     return pass.startOffset + ((time - pass.startTime) * this.bpm) / 60;
   }
 
-  // The audio time being heard now, for the display: the audio clock moves in
+  // The audio time being heard now, for the display. The audio clock moves in
   // steps (on Android, tens of milliseconds at a time), which made the
-  // playhead jerk; the output timestamp, carried on by the page's own clock,
-  // moves smoothly and allows for the speaker's delay. Never goes back.
+  // playhead stall and jump: it runs on by the page's own clock, kept between
+  // the audio clock and 0.1 s past it, less the speaker's delay. Only
+  // the audio clock itself is trusted to advance: the output timestamp, used
+  // before, stopped on a phone after a dozen bars while the music played on.
+  // Never goes back.
   heardTime() {
-    const ts = this.ctx.getOutputTimestamp?.();
-    let t = ts?.contextTime > 0 && ts.performanceTime > 0 ? ts.contextTime + (performance.now() - ts.performanceTime) / 1000 : this.ctx.currentTime;
-    if (!(t <= this.ctx.currentTime + 0.1)) t = this.ctx.currentTime; // a bad timestamp
-    return (this.lastHeard = Math.max(this.lastHeard ?? -Infinity, t));
+    const clock = this.ctx.currentTime;
+    const now = performance.now();
+    const run = this.run ? this.run.t + (now - this.run.now) / 1000 : clock;
+    const t = Math.min(clock + 0.1, Math.max(clock, run));
+    this.run = { t, now };
+    return (this.lastHeard = Math.max(this.lastHeard ?? -Infinity, t - Math.min(0.3, this.ctx.outputLatency || 0)));
   }
 
   position(time) {
@@ -80,7 +85,7 @@ export class Player {
     this.ensureContext();
     this.stop(false);
     this.ctx.resume();
-    this.lastHeard = null;
+    this.lastHeard = this.run = null;
     let at = 0;
     this.segments = segments.map((s) => {
       const seg = { ...s, at };
