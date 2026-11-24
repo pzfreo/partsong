@@ -11,6 +11,12 @@ FILES=(
   "39f9f0894d478800487ed9f7dbe92618498db320cf55c8e3d89adff8dce658da onnxruntime-web@1.30.0/dist/ort-wasm-simd-threaded.asyncify.wasm"
   "57456c8e0c81e46be31174b499ef77f2b9f5ee46d04412ba627320a36755d4c2 pdfjs-dist@6.4.299/build/pdf.min.mjs"
   "9536359f1b8367850d485731ca1d5e45c159a7b7a0912325e539937aa21ceb18 pdfjs-dist@6.4.299/build/pdf.worker.min.mjs"
+  # pdf.js's decoders for images in JBIG2 and JPEG 2000 (scanned editions) and
+  # for colour profiles: without them those pages are drawn blank.
+  "95e5002597af0824004aa57b1900fe019715db389e37640b1e58395e42f00cc5 pdfjs-dist@6.4.299/wasm/openjpeg.wasm"
+  "466f45c2a61a698152fb5400c27e56ff2ceb73dcb71fde3fc366a502308eaab0 pdfjs-dist@6.4.299/wasm/jbig2.wasm"
+  "663d86126d5f5fcb1c61490f94353e2a8375660b8c5498ab3ebab5a34b08800e pdfjs-dist@6.4.299/wasm/qcms_bg.wasm"
+  "73e1ba37d2bad5bab2a964f40a9eed96209666efc067c3322626214bbef234a0 pdfjs-dist@6.4.299/iccs/CGATS001Compat-v2-micro.icc"
   "86e439e5ec1c0cbf8b7051e0cf32291d377fb97cf6b8976b9ef87c714e0ca032 opensheetmusicdisplay@2.2.0/build/opensheetmusicdisplay.min.js"
   "d2c4c782f180c86ed30b1f5d9487a34a0d370bf9b4535285734ea187d38f9bb5 mp4-muxer@5.2.2/build/mp4-muxer.mjs"
 )
