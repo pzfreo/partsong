@@ -68,8 +68,17 @@ fn kinds(r: &Row) -> Vec<bool> {
     r.staffs.iter().map(|s| s.1).collect()
 }
 
-fn regions(rows: &[Row]) -> Regions {
-    Regions { centers: rows.iter().flat_map(|r| r.staffs.iter().map(|s| (s.0.min_y, s.0.max_y))).collect() }
+/// Every staff's box on the page: (min_x, max_x, min_y, max_y).
+fn boxes(rows: &[Row]) -> Vec<(f64, f64, f64, f64)> {
+    rows.iter().flat_map(|r| r.staffs.iter().map(|s| (s.0.min_x, s.0.max_x, s.0.min_y, s.0.max_y))).collect()
+}
+
+/// The staves above and below `staff` that limit its crop: only those in its
+/// own column (overlapping it across the page). On a page in two columns a
+/// staff in the other column cut the crop to the five lines, or turned it
+/// upside down (homr-rs's "capacity overflow"). One column: every staff.
+fn regions(boxes: &[(f64, f64, f64, f64)], staff: &Staff) -> Regions {
+    Regions { centers: boxes.iter().filter(|b| b.0 < staff.max_x && staff.min_x < b.1).map(|b| (b.2, b.3)).collect() }
 }
 
 fn is_note_or_rest(s: &Symbol) -> bool {
@@ -79,13 +88,13 @@ fn is_note_or_rest(s: &Symbol) -> bool {
 /// _split_false_grand_staffs: a grand staff without a bass clef read below
 /// is read as its two staves.
 fn split_false_grand_staffs(rows: Vec<Row>, reader: &mut dyn Reader) -> Result<Vec<Row>, Stop> {
-    let reg = regions(&rows);
+    let reg = boxes(&rows);
     let mut out = Vec::new();
     for row in rows {
         let mut staffs = Vec::new();
         for (staff, grand) in row.staffs {
             if let Some(halves) = staff.halves.as_deref() {
-                let symbols = reader.read(&staff, grand, &reg)?;
+                let symbols = reader.read(&staff, grand, &regions(&reg, &staff))?;
                 let first = symbols.iter().position(is_note_or_rest).unwrap_or(symbols.len());
                 let mut lower: Option<String> = None;
                 for s in &symbols[..first] {
@@ -247,13 +256,13 @@ fn bar_count(symbols: &[Symbol]) -> usize {
 /// homr's own parse_staffs (one layout on the page).
 fn parse_staffs(rows: Vec<Row>, reader: &mut dyn Reader) -> Result<Vec<Vec<Symbol>>, Stop> {
     let rows = ensure_same_number_of_staffs(rows);
-    let reg = regions(&rows);
+    let reg = boxes(&rows);
     let mut voices = Vec::new();
     for voice in 0..rows[0].staffs.len() {
         let mut out: Vec<Symbol> = Vec::new();
         for row in &rows {
             let (staff, grand) = row.staffs.get(voice).ok_or_else(|| Stop::Error("IndexError: list index out of range".into()))?;
-            let result = reader.read(staff, *grand, &reg)?;
+            let result = reader.read(staff, *grand, &regions(&reg, staff))?;
             if result.is_empty() {
                 continue;
             }
@@ -341,7 +350,7 @@ pub fn parse_staffs_by_layout(rows: Vec<Row>, user_ranges: &[(f64, f64)], reader
         return parse_staffs(rows, reader);
     }
     let all: Vec<Row> = runs.iter().flatten().cloned().collect();
-    let reg = regions(&all);
+    let reg = boxes(&all);
     let mut parts: Vec<((bool, usize), Vec<Symbol>)> = Vec::new();
     let mut order: Vec<(bool, usize)> = Vec::new();
     let mut rows_read: Vec<usize> = Vec::new();
@@ -356,7 +365,7 @@ pub fn parse_staffs_by_layout(rows: Vec<Row>, user_ranges: &[(f64, f64)], reader
         for row in run {
             let mut read: Vec<((bool, usize), Vec<Symbol>)> = Vec::new();
             for (key, (staff, grand)) in keys.iter().zip(&row.staffs) {
-                let symbols = reader.read(staff, *grand, &reg)?;
+                let symbols = reader.read(staff, *grand, &regions(&reg, staff))?;
                 if !symbols.is_empty() {
                     read.push((*key, symbols));
                 }
@@ -458,4 +467,28 @@ pub fn drop_false_key_changes(symbols: Vec<Symbol>) -> Vec<Symbol> {
         }
     }
     rows.into_iter().flatten().collect()
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::*;
+    use homr_rs::staff::StaffPoint;
+
+    fn staff(x0: f64, x1: f64, top: f64) -> Staff {
+        let grid = (0..=((x1 - x0) / 20.0) as usize)
+            .map(|i| StaffPoint { x: x0 + 20.0 * i as f64, y: (0..5).map(|l| top + 10.0 * l as f64).collect(), angle: 0.0 })
+            .collect();
+        Staff::from_grid(grid).unwrap()
+    }
+
+    // Two columns: a staff's crop is limited by the staves above and below it
+    // in its own column, not by one beside it in the other.
+    #[test]
+    fn only_staves_in_the_same_column_limit_a_crop() {
+        let (left_top, left_low, right) = (staff(100.0, 700.0, 300.0), staff(100.0, 700.0, 500.0), staff(900.0, 1500.0, 290.0));
+        let rows = vec![Row { staffs: vec![(left_top.clone(), false), (left_low, false), (right, false)] }];
+        let centers = regions(&boxes(&rows), &left_top).centers;
+        assert_eq!(centers.len(), 2);
+        assert!(centers.iter().all(|c| c.0 != 290.0));
+    }
 }
