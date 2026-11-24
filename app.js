@@ -1846,7 +1846,7 @@ async function openFiles(files) {
       }
       xmls.push(text);
       name ||= f.name.replace(/\.(musicxml|xml|mxl)$/i, "");
-      zipped ||= /\.mxl$/i.test(f.name);
+      zipped ||= new Uint8Array(await f.slice(0, 2).arrayBuffer()).join() === "80,75"; // "PK": a file shared with no name too
     }
     // An ordinary PDF is sheet music to read: its pages, to look over before
     // Read music (step 1 of 3, as with photos).
