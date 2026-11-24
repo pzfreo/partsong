@@ -1825,6 +1825,7 @@ async function openFiles(files) {
     const xmls = [];
     const pdfs = [];
     let name = "";
+    let zipped = false;
     for (const f of files) {
       const shared = await readScoreFile(f);
       if (shared) {
@@ -1845,6 +1846,7 @@ async function openFiles(files) {
       }
       xmls.push(text);
       name ||= f.name.replace(/\.(musicxml|xml|mxl)$/i, "");
+      zipped ||= /\.mxl$/i.test(f.name);
     }
     // An ordinary PDF is sheet music to read: its pages, to look over before
     // Read music (step 1 of 3, as with photos).
@@ -1855,6 +1857,9 @@ async function openFiles(files) {
     if (!xmls.length) return;
     const title = parsePage(xmls[0]).title || name || "Imported score";
     await importScore({ id: crypto.randomUUID(), title, created: Date.now(), pages: xmls, images: [] });
+    // Is the MusicXML import used (CPDL's .mxl, or .musicxml)?
+    track("open: musicxml");
+    track(`open: musicxml (${deviceTag}): ${zipped ? "mxl" : "xml"}`);
   } catch (err) {
     $("library-status").textContent = `Couldn't open that file: ${err.message}`;
   }
