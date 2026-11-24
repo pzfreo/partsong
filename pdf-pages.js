@@ -2,10 +2,9 @@
 // first use; the service worker caches it for offline use).
 
 const PDFJS_URL = new URL("lib/pdfjs-dist@6.4.299/build/", import.meta.url).href; // scripts/fetch-libs.sh
-// Its decoders for images in JBIG2 and JPEG 2000, which scanned editions use,
-// and for colour profiles: without them pdf.js draws those pages blank.
+// Its decoders for images in JBIG2, CCITT fax and JPEG 2000, which scanned
+// editions use: without them pdf.js draws those pages blank.
 const PDFJS_WASM = new URL("lib/pdfjs-dist@6.4.299/wasm/", import.meta.url).href;
-const PDFJS_ICC = new URL("lib/pdfjs-dist@6.4.299/iccs/", import.meta.url).href;
 const TARGET_WIDTH = 2480; // about 300 dpi across an A4 page
 const MAX_SIDE = 4200; // same cap as photos (see normalise() in app.js)
 
@@ -58,7 +57,7 @@ async function checkImage(blob, n) {
 
 export async function pdfPages(file, onPage) {
   const lib = await load();
-  const task = lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), wasmUrl: PDFJS_WASM, iccUrl: PDFJS_ICC });
+  const task = lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), wasmUrl: PDFJS_WASM });
   try {
     const doc = await task.promise;
     for (let n = 1; n <= doc.numPages; n++) {

@@ -1,10 +1,10 @@
-// PDFs whose page is a JPEG 2000 or a JBIG2 image (scanned editions use them) draw their music, not blank pages: pdf.js decodes those images with
+// PDFs whose page is a JPEG 2000, JBIG2 or CCITT fax image (scanned editions use them) draw their music, not blank pages: pdf.js decodes those images with
 // its own decoders (lib/pdfjs-dist@*/wasm/), which Partsong didn't ship, and
 // without them drew white pages ("staff lines 0.0%, noteheads 0.0%").
 //   node scripts/headless-test.mjs http://localhost:8765/index.html out.json 60 tests/drive-pdf-images.js
 const { pdfPages } = await import("./pdf-pages.js");
 const ink = {};
-for (const name of ["huron-jpx.pdf", "huron-jbig2.pdf"]) {
+for (const name of ["huron-jpx.pdf", "huron-jbig2.pdf", "huron-ccitt.pdf"]) {
   const pdf = await (await fetch(`testdata/${name}`)).blob();
   await pdfPages(new File([pdf], name), async (blob) => {
     const bmp = await createImageBitmap(blob);
@@ -17,4 +17,4 @@ for (const name of ["huron-jpx.pdf", "huron-jbig2.pdf"]) {
     ink[name] = dark / (d.length / 4);
   });
 }
-window.result = { ink, ok: Object.values(ink).length === 2 && Object.values(ink).every((v) => v > 0.02) };
+window.result = { ink, ok: Object.values(ink).length === 3 && Object.values(ink).every((v) => v > 0.02) };
