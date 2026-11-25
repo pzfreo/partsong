@@ -71,13 +71,21 @@ const originOf = (url) => {
 };
 // The first frame of ours in a stack: "app.js:2848" (Chrome's "at f (…/app.js?v=3:2848:9)", Safari's "f@…/app.js:2848:9").
 const whereFrom = (stack) => String(stack ?? "").match(/([\w.-]+\.m?js)(?:\?[^:\s)]*)?:(\d+)/)?.slice(1, 3).join(":") ?? "";
+// Partsong's code is all in .js files: a stack whose frames are on the page
+// itself (".../:512:420") is a script injected into the page, such as the
+// Google app's own browser's ("Na", iPhone, 25 Nov), not ours.
+const injected = (stack) => !whereFrom(stack) && /https?:\/\/[^\s()]*\/(\?[^\s:()]*)?:\d+:\d+/.test(String(stack ?? ""));
 window.addEventListener("error", (e) => {
   if (e.message === "Script error." || (e.filename && originOf(e.filename) !== location.origin)) return;
+  // (The page's own address, not a .js file; a blob: worker is ours.)
+  const at = e.filename ? new URL(e.filename) : null;
+  if (injected(e.error?.stack) || (/^https?:$/.test(at?.protocol) && !/\.m?js$/.test(at.pathname))) return;
   const file = e.filename?.split("/").at(-1).split("?")[0];
   showError(e.message, whereFrom(e.error?.stack) || (file ? `${file}:${e.lineno}` : ""), e.error?.stack);
 });
 window.addEventListener("unhandledrejection", (e) => {
   const r = e.reason;
+  if (injected(r?.stack)) return;
   showError(r?.message ?? String(r), whereFrom(r?.stack), r?.stack, { name: r?.name, type: r?.constructor?.name, code: r?.code });
 });
 // What the singer did last (buttons pressed, events counted), with seconds
