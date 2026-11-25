@@ -606,11 +606,11 @@ function rustFrames(e, build) {
 }
 
 // The page's pixels as homr's cv2.imread sees them (RGBA, no colour conversion).
-// maxWidth: a smaller copy if the photo is wider (photoWidth says how wide it was).
-async function pixels(bytes, maxWidth = Infinity) {
+// maxPixels: a smaller copy if the photo is bigger (photoWidth says how wide it was).
+async function pixels(bytes, maxPixels = Infinity) {
   const bmp = await createImageBitmap(new Blob([bytes]), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
   const photoWidth = bmp.width;
-  const k = Math.min(1, maxWidth / bmp.width);
+  const k = Math.min(1, Math.sqrt(maxPixels / (bmp.width * bmp.height)));
   const canvas = new OffscreenCanvas(Math.round(bmp.width * k), Math.round(bmp.height * k));
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.imageSmoothingQuality = "high";
@@ -635,11 +635,13 @@ const squeeze = async (bytes, fmt, Stream) => new Uint8Array(await new Response(
 // usable; only a trap (WebAssembly.RuntimeError) drops it, as its state may
 // be broken. Requests come one at a time (app.js awaits each).
 let pageReader = null;
-// In low memory, a photo goes to the reader at most this wide (homr works on
-// the page 1920 wide, after cropping its margins): a phone's 12 MP photo took
-// the reader past what Safari would give it, low memory or not (an iPhone on
-// iOS 17, 24 Nov). Positions come back on the photo.
-const SMALLER_PAGE = 2600;
+// In low memory, a photo goes to the reader at most this many pixels (a
+// phone's 12 MP photo took the reader past what Safari would give it, low
+// memory or not: an iPhone on iOS 17, 24 Nov). Pixels, not width: homr works
+// on the page 1920 wide after cropping its margins, and a page photographed
+// sideways, capped by width, came out narrower than that. Positions come back
+// on the photo.
+const SMALLER_PAGE = 9.6e6;
 let smallerPages = false;
 // page.image, and its pixels, are let go once they're in the reader, so they
 // aren't kept while segnet runs (a phone's photo: about 50 MB).
@@ -672,8 +674,14 @@ async function openPage(page, systemsJson, packed) {
   // (It never shrinks: what it grew to is what this page needed.)
   post({ type: "log", msg: `Page reader memory: ${Math.round(mem().byteLength / 1048576)} MB (page ${width}x${height})` });
 
+  // A page's segmentation, saved when its systems were found, ends with the
+  // width the reader had it at: used only at the same width (a smaller copy in
+  // low memory crops a pixel or two differently, and the maps would be out of
+  // line with the page without anything saying so). Saved before this: full size.
+  const n = tiles * WIN * WIN;
   let classes = packed ? await squeeze(packed, "deflate", DecompressionStream) : null;
-  if (classes?.length !== tiles * WIN * WIN) classes = await segment(rs, tiles);
+  const madeAt = classes?.length === n + 4 ? new DataView(classes.buffer, classes.byteOffset + n, 4).getUint32(0, true) : classes?.length === n ? photoW : -1;
+  classes = madeAt === width ? classes.subarray(0, n) : await segment(rs, tiles);
   lap("segnet");
   lastSeen = seen(classes);
   post({ type: "log", msg: `Seen on the page: staff lines ${lastSeen.staff.toFixed(1)}%, noteheads ${lastSeen.heads.toFixed(1)}%` });
@@ -682,7 +690,7 @@ async function openPage(page, systemsJson, packed) {
   rs.dealloc(cp, classes.byteLength); // also when the page has no music (it throws below)
   if (segmented !== 0) throw new Error(message());
   lap("segment");
-  return { rs, mem, copyIn, message, classes, ms };
+  return { rs, mem, copyIn, message, classes, ms, width };
 }
 
 // What segnet made of the last page opened: the share of it (per cent) it took
@@ -741,13 +749,16 @@ async function layout(page, systemsJson) {
   // short-lived copies, and on top of the page's picture opening that was the
   // peak of finding systems (Chrome, a phone photo: about 950 MB).
   await session(MODELS[0]);
-  const { rs, message, classes, ms: open } = await openPage(page, systemsJson);
+  const { rs, message, classes, ms: open, width } = await openPage(page, systemsJson);
   const t1 = performance.now();
   rs.page_layout();
   const t2 = performance.now();
   const systems = JSON.parse(message());
   rs.page_close();
-  const out = { ...systems, classes: await squeeze(classes, "deflate", CompressionStream) };
+  const tagged = new Uint8Array(classes.length + 4); // the maps, then the width they were made at
+  tagged.set(classes);
+  new DataView(tagged.buffer).setUint32(classes.length, width, true);
+  const out = { ...systems, classes: await squeeze(tagged, "deflate", CompressionStream) };
   const t3 = performance.now();
   out.timing = `decode ${Math.round(open.decode)} ms, tiles ${Math.round(open.tiles)} ms, segnet+argmax ${Math.round(open.segnet)} ms, segment ${Math.round(open.segment)} ms, layout ${Math.round(t2 - t1)} ms, pack ${Math.round(t3 - t2)} ms (total open ${Math.round(t1 - t)})`;
   return out;

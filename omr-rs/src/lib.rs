@@ -2,7 +2,7 @@
 //! rules (layout.rs), driven from omr-worker.js, which runs the three models
 //! with onnxruntime-web. One page at a time:
 //!
-//!   page_open(rgba, w, h, systems)  -> number of segnet tiles
+//!   page_open(rgba, w, h, systems, photo_w) -> number of segnet tiles (takes over rgba)
 //!   tile(i)                         -> segnet input for tile i (3x320x320 f32)
 //!   page_segment(classes)           -> staffs found (argmax of segnet per tile)
 //!   page_layout()                   -> its systems, before reading (JSON in msg)
