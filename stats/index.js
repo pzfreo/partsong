@@ -112,7 +112,7 @@ function page(days, { start, hits }, problems) {
     { name: "New devices", sub: "% of visits", f: (d) => sum(is("use: day 1"), d), of: visits, unit: "new devices", ofUnit: "visits" },
     { name: "Back, 3+ days", f: (d) => sum((p) => DAY3.test(p), d) },
     { name: "Reads", sub: "worked", f: ok },
-    { name: "Failed", sub: "% of tries", f: failed, of: finished, unit: "failed", ofUnit: "tries" },
+    { name: "Failed", f: failed },
     { name: "Restarts", sub: "per 100 tries", f: (d) => sum(starts("read-restarted"), d) + sum(starts("read-gave-up"), d), of: finished, unit: "restarts", ofUnit: "tries", plain: true },
     { name: "Plays", f: (d) => sum(is("play"), d) },
     { name: "Shares", f: (d) => sum(is("share"), d) },
