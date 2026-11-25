@@ -14,12 +14,13 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# Two jobs, as GitHub's own Pages workflow: deploy-pages straight after the
+# upload, in the same job, often found no artifact ("No artifacts named
+# github-pages", 3 of 4 pushes on 24-25 Nov; the site is ~290 MB): it isn't
+# listed until a moment after uploading. The deploy job starts once it is.
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,5 +54,12 @@ jobs:
             if (missing.length) { console.error("Missing from _site:", missing); process.exit(1); }
             console.log("All", files.length, "precached files present");'
       - uses: actions/upload-pages-artifact@v3
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
