@@ -101,26 +101,42 @@ function page(days, { start, hits }, problems) {
   const starts = (p) => (path) => path.startsWith(p);
   const DAY3 = /^use: day (3|4–5|6–10|11–20|21–50|51\+)$/;
 
-  // Day by day.
+  // Day by day. A column is a count, or a share of another count ("of"); each
+  // has a bar, scaled to its own busiest day, with the counts on hover.
+  const visits = (d) => sum(is("/"), d);
+  const ok = (d) => sum(is("read-ok"), d);
+  const failed = (d) => sum(is("read-failed"), d);
+  const finished = (d) => ok(d) + failed(d);
   const cols = [
-    ["Visits", (d) => sum((p) => p === "/", d)],
-    ["New devices", (d) => sum(is("use: day 1"), d)],
-    ["Back, 3+ days", (d) => sum((p) => DAY3.test(p), d)],
-    ["Reads", (d) => sum(is("read-ok"), d)],
-    ["Failed", (d) => sum(is("read-failed"), d)],
-    ["Restarts", (d) => sum(starts("read-restarted"), d) + sum(starts("read-gave-up"), d)],
-    ["Plays", (d) => sum(is("play"), d)],
-    ["Shares", (d) => sum(is("share"), d)],
-    ["Links opened", (d) => sum(is("receive: link"), d)],
+    { name: "Visits", f: visits },
+    { name: "New devices", sub: "% of visits", f: (d) => sum(is("use: day 1"), d), of: visits, unit: "new devices", ofUnit: "visits" },
+    { name: "Back, 3+ days", f: (d) => sum((p) => DAY3.test(p), d) },
+    { name: "Reads", f: ok },
+    { name: "Failed", sub: "% of reads", f: failed, of: finished, unit: "failed", ofUnit: "reads (worked or failed)" },
+    { name: "Restarts", sub: "% of reads", f: (d) => sum(starts("read-restarted"), d) + sum(starts("read-gave-up"), d), of: finished, unit: "restarts", ofUnit: "reads (worked or failed)" },
+    { name: "Plays", f: (d) => sum(is("play"), d) },
+    { name: "Shares", f: (d) => sum(is("share"), d) },
+    { name: "Links opened", f: (d) => sum(is("receive: link"), d) },
   ];
-  const rows = dayList.slice().reverse().map((d) => [d, ...cols.map(([, f]) => f(d))]);
-  const maxVisits = Math.max(1, ...rows.map((r) => r[1]));
-  const daily = `<table><thead><tr><th>Day</th>${cols.map(([n]) => `<th class="n">${n}</th>`).join("")}</tr></thead><tbody>${rows
-    .map((r) => `<tr><td class="nw">${new Date(r[0]).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}</td>${r
-      .slice(1)
-      .map((v, i) => (i === 0 ? `<td class="n bar" style="--w:${Math.round((v / maxVisits) * 100)}%"><b>${v}</b></td>` : `<td class="n">${v || ""}</td>`))
-      .join("")}</tr>`)
-    .join("")}</tbody></table>`;
+  // [shown value (count, or share 0..1), count, of] per column for a day (undefined: the whole period)
+  const cells = (d) => cols.map((c) => {
+    const n = c.f(d);
+    if (!c.of) return [n, n];
+    const of = c.of(d);
+    return [of ? n / of : null, n, of];
+  });
+  const perDay = dayList.slice().reverse().map((d) => [d, cells(d)]);
+  const most = cols.map((_, i) => Math.max(1e-9, ...perDay.map(([, c]) => c[i][0] ?? 0)));
+  const cell = ([v, n, of], i, bar = true) => {
+    const c = cols[i];
+    const shown = !c.of ? (v || "") : v == null ? "" : `${Math.round(v * 100)}%`;
+    const tip = !c.of ? `${n} ${c.name.toLowerCase()}` : `${n} ${c.unit} of ${of || 0} ${c.ofUnit}`;
+    return `<td class="n${bar ? " bar" : ""}" style="--w:${bar ? Math.round(((v ?? 0) / most[i]) * 100) : 0}%" title="${esc(tip)}"><b>${shown}</b></td>`;
+  };
+  const daily = `<table><thead><tr><th>Day</th>${cols.map((c) => `<th class="n">${c.name}${c.sub ? `<br><span class="u">${c.sub}</span>` : ""}</th>`).join("")}</tr></thead><tbody>${perDay
+    .map(([d, c]) => `<tr><td class="nw">${new Date(d).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}</td>${c.map((x, i) => cell(x, i)).join("")}</tr>`)
+    .join("")}</tbody><tfoot><tr><th>All ${dayList.length} days</th>${cells().map((x, i) => cell(x, i, false)).join("")}</tr></tfoot></table>
+  <p class="note">Each bar is scaled to its column's busiest day. Hover a figure for the counts behind it. Reads: scores read; failed and restarted reads are shares of reads that worked or failed.</p>`;
 
   // Reads by device, and by version: "read-ok (iPhone v326): low memory" etc.
   const byDevice = new Map();
@@ -174,6 +190,7 @@ h1{font-size:20px;margin:4px 0 2px;color:var(--accent)}h2{font-size:16px;margin:
 section{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;overflow-x:auto}
 table{border-collapse:collapse;width:100%}th,td{padding:5px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
 th{font-size:12px;color:var(--muted);font-weight:600}.n{text-align:right;font-variant-numeric:tabular-nums}.nw{white-space:nowrap}
+th .u{font-weight:400}tfoot th{color:var(--text);border-top:2px solid var(--border)}tfoot td b{font-weight:700}
 .bar{min-width:70px;background:linear-gradient(to left,var(--bar) var(--w),transparent var(--w)) no-repeat right 4px center/calc(100% - 8px) 60%}.bar b{font-weight:600}
 .bad{color:var(--bad);font-weight:600}.msg{min-width:200px;max-width:340px;overflow-wrap:anywhere}.mono{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tile{border:1px solid var(--border);border-radius:8px;padding:10px}
