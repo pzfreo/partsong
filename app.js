@@ -28,8 +28,16 @@ const ua = navigator.userAgent;
 const iDevice = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 // Apps' built-in browsers (Instagram, Facebook, Messenger) keep little storage
 // and memory: the music reader is best downloaded in the phone's own browser.
-const inAppBrowser = /Instagram|FBAN|FBAV|FB_IAB|Messenger/.test(ua);
-const IN_APP_TIP = " This is Instagram's or Facebook's own browser: open partsong.app in Safari or Chrome instead (⋯ menu, Open in browser).";
+// Apps' own browsers (Google, Instagram, Facebook...) add scripts of their own
+// to pages and, on iPhones, can't run the reader on several cores; scores
+// saved there don't show in Safari or Chrome. Which app, and which browser to
+// suggest instead (Safari on an iPhone or iPad, Chrome on Android).
+const inAppName = /Instagram/.test(ua) ? "Instagram" : /FBAN|FBAV|FB_IAB/.test(ua) ? "Facebook" : /Messenger/.test(ua) ? "Messenger"
+  : /GSA\//.test(ua) ? "the Google app" : /LinkedInApp/.test(ua) ? "LinkedIn" : /Snapchat/.test(ua) ? "Snapchat" : /\bLine\//.test(ua) ? "LINE"
+  : /Android/.test(ua) && /; wv\)/.test(ua) ? "an app" : "";
+const inAppBrowser = !!inAppName;
+const realBrowser = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? "Safari" : "Chrome";
+const IN_APP_TIP = ` This is ${inAppName}'s own browser: open partsong.app in ${realBrowser} instead.`;
 const VERSION = new URL(import.meta.url).searchParams.get("v") || "dev";
 // Deploys are numbered by how many commits main has (see pages.yml), so a
 // newer version always has a bigger number.
@@ -826,6 +834,26 @@ function loadScan(images = [], xmls = [], id = null, created = null, title = "")
 }
 
 $("new-scan").onclick = () => (reading ? show("scan") : loadScan());
+
+// In an app's own browser, the home screen suggests the phone's own browser,
+// with the app's usual way there and a Copy link (the whole address, so a
+// shared score's link still works pasted into Safari or Chrome).
+if (inAppBrowser) {
+  const way = { Instagram: "tap ⋯ at the top, then Open in external browser", Facebook: "tap ⋯ at the top, then Open in browser", Messenger: "tap ⋯ at the top, then Open in browser",
+    "the Google app": `tap the share button, then Open in ${realBrowser}` }[inAppName] ?? (realBrowser === "Chrome" ? "tap ⋮ at the top, then Open in Chrome" : "");
+  $("in-app-text").textContent = `You're in ${inAppName}'s own browser. Partsong works best in ${realBrowser}: music reads faster, and your scores stay in one place.${way ? ` To open it there, ${way}, or copy the link and paste it into ${realBrowser}.` : ` Copy the link and paste it into ${realBrowser}.`}`;
+  $("in-app-note").hidden = false;
+  track(`in-app-browser (${deviceTag}): ${inAppName}`);
+  $("in-app-copy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      $("in-app-copied").textContent = `Copied: now open ${realBrowser} and paste it into the address bar.`;
+      track("in-app-browser: copied");
+    } catch {
+      $("in-app-copied").textContent = `Couldn't copy: type partsong.app into ${realBrowser}.`;
+    }
+  };
+}
 
 // Reading on iPhone/iPad is less reliable: Safari there is short of memory,
 // so a long score can stop part-way (the read then resumes where it stopped).
