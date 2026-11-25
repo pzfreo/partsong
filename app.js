@@ -385,6 +385,9 @@ async function checkForUpdate() {
     const html = await (await fetch(`./?check=${Date.now()}`, { cache: "no-store" })).text();
     const live = /app\.js\?v=(\w+)/.exec(html)?.[1];
     if (live && live !== VERSION && $("update-banner").hidden) {
+      liveVersion = live;
+      $("update-text").textContent = `Partsong ${shownVersion(live)} is ready (you have ${SHOWN_VERSION}).`;
+      $("update-notes").hidden = true;
       $("update-banner").hidden = false;
       updateTag = `${deviceTag}→${shownVersion(live)}`;
       countUpdate("offered");
@@ -400,6 +403,27 @@ $("update-now").onclick = async (e) => {
   setTimeout(() => location.reload(), 300);
 };
 $("update-later").onclick = () => { countUpdate("later"); $("update-banner").hidden = true; };
+// What's new, before updating: the live whats-new.html's releases newer than
+// this one (each a <section data-version>), fetched fresh, so it's the new
+// version's list, not this one's.
+let liveVersion = "";
+const versionNumber = (v) => +(/^\d+/.exec(v)?.[0] ?? 0);
+$("update-whats-new").onclick = async () => {
+  const box = $("update-notes");
+  if (!box.hidden) return (box.hidden = true);
+  box.hidden = false;
+  box.textContent = "Loading…";
+  countUpdate("whats-new");
+  try {
+    const doc = new DOMParser().parseFromString(await (await fetch(`whats-new.html?check=${Date.now()}`, { cache: "no-store" })).text(), "text/html");
+    const from = versionNumber(VERSION), to = versionNumber(liveVersion) || Infinity;
+    const news = [...doc.querySelectorAll("section[data-version]")].filter((s) => +s.dataset.version > from && +s.dataset.version <= to);
+    box.replaceChildren(...(news.length ? news.map((s) => document.importNode(s, true)) : [Object.assign(document.createElement("p"), { textContent: "Nothing you'd notice: fixes behind the scenes." })]));
+    for (const a of box.querySelectorAll("a")) a.target = "_blank";
+  } catch {
+    box.textContent = "Couldn't fetch the list. It's on the What's new page in Help.";
+  }
+};
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && checkForUpdate());
 setInterval(checkForUpdate, 30 * 60000);
 setTimeout(checkForUpdate, 10000);
