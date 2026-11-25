@@ -101,8 +101,8 @@ function page(days, { start, hits }, problems) {
   const starts = (p) => (path) => path.startsWith(p);
   const DAY3 = /^use: day (3|4–5|6–10|11–20|21–50|51\+)$/;
 
-  // Day by day. A column is a count, or a share of another count ("of"); each
-  // has a bar, scaled to its own busiest day, with the counts on hover.
+  // Day by day. A column is a count, with a bar scaled to its busiest day, or a
+  // share of another count ("of"), with a bar out of 100 and the counts on hover.
   const visits = (d) => sum(is("/"), d);
   const ok = (d) => sum(is("read-ok"), d);
   const failed = (d) => sum(is("read-failed"), d);
@@ -111,9 +111,9 @@ function page(days, { start, hits }, problems) {
     { name: "Visits", f: visits },
     { name: "New devices", sub: "% of visits", f: (d) => sum(is("use: day 1"), d), of: visits, unit: "new devices", ofUnit: "visits" },
     { name: "Back, 3+ days", f: (d) => sum((p) => DAY3.test(p), d) },
-    { name: "Reads", f: ok },
-    { name: "Failed", sub: "% of reads", f: failed, of: finished, unit: "failed", ofUnit: "reads (worked or failed)" },
-    { name: "Restarts", sub: "% of reads", f: (d) => sum(starts("read-restarted"), d) + sum(starts("read-gave-up"), d), of: finished, unit: "restarts", ofUnit: "reads (worked or failed)" },
+    { name: "Reads", sub: "worked", f: ok },
+    { name: "Failed", sub: "% of tries", f: failed, of: finished, unit: "failed", ofUnit: "tries" },
+    { name: "Restarts", sub: "per 100 tries", f: (d) => sum(starts("read-restarted"), d) + sum(starts("read-gave-up"), d), of: finished, unit: "restarts", ofUnit: "tries", plain: true },
     { name: "Plays", f: (d) => sum(is("play"), d) },
     { name: "Shares", f: (d) => sum(is("share"), d) },
     { name: "Links opened", f: (d) => sum(is("receive: link"), d) },
@@ -126,17 +126,17 @@ function page(days, { start, hits }, problems) {
     return [of ? n / of : null, n, of];
   });
   const perDay = dayList.slice().reverse().map((d) => [d, cells(d)]);
-  const most = cols.map((_, i) => Math.max(1e-9, ...perDay.map(([, c]) => c[i][0] ?? 0)));
+  const most = cols.map((c, i) => (c.of ? 1 : Math.max(1, ...perDay.map(([, x]) => x[i][0]))));
   const cell = ([v, n, of], i, bar = true) => {
     const c = cols[i];
-    const shown = !c.of ? (v || "") : v == null ? "" : `${Math.round(v * 100)}%`;
-    const tip = !c.of ? `${n} ${c.name.toLowerCase()}` : `${n} ${c.unit} of ${of || 0} ${c.ofUnit}`;
-    return `<td class="n${bar ? " bar" : ""}" style="--w:${bar ? Math.round(((v ?? 0) / most[i]) * 100) : 0}%" title="${esc(tip)}"><b>${shown}</b></td>`;
+    const shown = !c.of ? v || "" : v == null ? "" : `${Math.round(v * 100)}${c.plain ? "" : "%"}`;
+    const w = Math.min(100, Math.round(((v ?? 0) / most[i]) * 100));
+    return `<td class="n${bar ? " bar" : ""}"${bar ? ` style="--w:${w}%"` : ""}${c.of ? ` title="${esc(`${n} ${c.unit} of ${of || 0} ${c.ofUnit}`)}"` : ""}><b>${shown}</b></td>`;
   };
-  const daily = `<table><thead><tr><th>Day</th>${cols.map((c) => `<th class="n">${c.name}${c.sub ? `<br><span class="u">${c.sub}</span>` : ""}</th>`).join("")}</tr></thead><tbody>${perDay
+  const daily = `<table class="daily"><thead><tr><th>Day</th>${cols.map((c) => `<th class="n">${c.name}${c.sub ? `<br><span class="u">${c.sub}</span>` : ""}</th>`).join("")}</tr></thead><tbody>${perDay
     .map(([d, c]) => `<tr><td class="nw">${new Date(d).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}</td>${c.map((x, i) => cell(x, i)).join("")}</tr>`)
     .join("")}</tbody><tfoot><tr><th>All ${dayList.length} days</th>${cells().map((x, i) => cell(x, i, false)).join("")}</tr></tfoot></table>
-  <p class="note">Each bar is scaled to its column's busiest day. Hover a figure for the counts behind it. Reads: scores read; failed and restarted reads are shares of reads that worked or failed.</p>`;
+  <p class="note">Bars on counts are scaled to the column's busiest day; bars on shares are out of 100. Tries: reads that worked or failed. A read can restart more than once, and a read that gave up isn't a try, so restarts can pass 100. Failed includes pages with no music found. Hover a share for the counts behind it.</p>`;
 
   // Reads by device, and by version: "read-ok (iPhone v326): low memory" etc.
   const byDevice = new Map();
@@ -190,7 +190,8 @@ h1{font-size:20px;margin:4px 0 2px;color:var(--accent)}h2{font-size:16px;margin:
 section{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;overflow-x:auto}
 table{border-collapse:collapse;width:100%}th,td{padding:5px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
 th{font-size:12px;color:var(--muted);font-weight:600}.n{text-align:right;font-variant-numeric:tabular-nums}.nw{white-space:nowrap}
-th .u{font-weight:400}tfoot th{color:var(--text);border-top:2px solid var(--border)}tfoot td b{font-weight:700}
+th .u{font-weight:400}tfoot th{color:var(--text)}tfoot th,tfoot td{border-top:2px solid var(--border)}tfoot td b{font-weight:700}
+.daily th:first-child,.daily td:first-child{position:sticky;left:0;background:var(--surface);z-index:1}
 .bar{min-width:70px;background:linear-gradient(to left,var(--bar) var(--w),transparent var(--w)) no-repeat right 4px center/calc(100% - 8px) 60%}.bar b{font-weight:600}
 .bad{color:var(--bad);font-weight:600}.msg{min-width:200px;max-width:340px;overflow-wrap:anywhere}.mono{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tile{border:1px solid var(--border);border-radius:8px;padding:10px}
