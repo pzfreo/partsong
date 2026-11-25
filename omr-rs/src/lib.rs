@@ -55,6 +55,9 @@ pub struct Page {
     input: Vec<f32>,
     input_dims: (usize, usize),
     vocab: Vocab,
+    /// The input image's size over the photo's (1, or less when the app sent
+    /// a smaller copy to save memory): positions are given on the photo.
+    shrink: f64,
 }
 
 impl Reader for Page {
@@ -82,7 +85,8 @@ impl Reader for Page {
         Err(Stop::Need)
     }
     fn to_input(&self, p: (f64, f64)) -> (f64, f64) {
-        self.mapping.as_ref().unwrap().apply(p)
+        let (x, y) = self.mapping.as_ref().unwrap().apply(p);
+        (x / self.shrink, y / self.shrink)
     }
 }
 
@@ -97,7 +101,7 @@ fn note_comments(s: &Symbol) -> Vec<String> {
 }
 
 impl Page {
-    pub fn open(bgr: Bgr, user_ranges: Vec<(f64, f64)>) -> Page {
+    pub fn open(bgr: Bgr, user_ranges: Vec<(f64, f64)>, shrink: f64) -> Page {
         // preprocess(), keeping the cropped size: positions map back through it
         let (cropped, crop) = autocrop(&bgr);
         let gray = clahe(&bgr_to_gray(&resize_image(&cropped)));
@@ -115,6 +119,7 @@ impl Page {
             input: vec![],
             input_dims: (0, 0),
             vocab: Vocab::default(),
+            shrink,
         }
     }
 
@@ -293,17 +298,23 @@ pub extern "C" fn buf_ptr() -> *const f32 {
     BUF.with(|b| b.borrow().as_ptr())
 }
 
-/// The page as RGBA pixels; systems: JSON-ish list of numbers
-/// (top, bottom, top, bottom, ...) as f64s, the user's systems if fixed.
+/// The page as RGBA pixels, from alloc(w * h * 4): the reader takes them over
+/// (no dealloc), and turns them into BGR in place, not into a second copy of
+/// the photo (36 MB for a phone's 12 MP). photo_w: the photo's width, when the
+/// app sent a smaller copy (positions are given on the photo), else w or 0.
+/// systems: (top, bottom, top, bottom, ...) as f64s, the user's systems if fixed.
 #[no_mangle]
-pub unsafe extern "C" fn page_open(rgba: *const u8, w: usize, h: usize, systems: *const f64, n_systems: usize) -> i32 {
-    let px = std::slice::from_raw_parts(rgba, w * h * 4);
-    let mut data = Vec::with_capacity(w * h * 3);
-    for p in px.chunks_exact(4) {
-        data.extend_from_slice(&[p[2], p[1], p[0]]); // cv2.imread: BGR, alpha dropped
+pub unsafe extern "C" fn page_open(rgba: *mut u8, w: usize, h: usize, systems: *const f64, n_systems: usize, photo_w: usize) -> i32 {
+    let n = w * h;
+    let mut data = Vec::from_raw_parts(rgba, n * 4, n * 4);
+    for i in 0..n {
+        let (r, g, b) = (data[4 * i], data[4 * i + 1], data[4 * i + 2]);
+        data[3 * i..3 * i + 3].copy_from_slice(&[b, g, r]); // cv2.imread: BGR, alpha dropped
     }
+    data.truncate(n * 3);
+    let shrink = if photo_w > w { w as f64 / photo_w as f64 } else { 1.0 };
     let ranges = if n_systems > 0 { std::slice::from_raw_parts(systems, n_systems * 2).chunks_exact(2).map(|c| (c[0], c[1])).collect() } else { vec![] };
-    let page = Page::open(Bgr { w, h, data }, ranges);
+    let page = Page::open(Bgr { w, h, data }, ranges, shrink);
     let n = page.tiles();
     PAGE.with(|p| *p.borrow_mut() = Some(page));
     n as i32

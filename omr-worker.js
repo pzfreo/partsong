@@ -606,15 +606,19 @@ function rustFrames(e, build) {
 }
 
 // The page's pixels as homr's cv2.imread sees them (RGBA, no colour conversion).
-async function pixels(bytes) {
+// maxWidth: a smaller copy if the photo is wider (photoWidth says how wide it was).
+async function pixels(bytes, maxWidth = Infinity) {
   const bmp = await createImageBitmap(new Blob([bytes]), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
-  const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+  const photoWidth = bmp.width;
+  const k = Math.min(1, maxWidth / bmp.width);
+  const canvas = new OffscreenCanvas(Math.round(bmp.width * k), Math.round(bmp.height * k));
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(bmp, 0, 0);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
   canvas.width = canvas.height = 0; // its memory back now, not when collected (see pdf-pages.js)
-  return data;
+  return Object.assign(data, { photoWidth });
 }
 
 // Deflated (a page's class maps are mostly background: a few MB to tens of KB).
@@ -631,6 +635,12 @@ const squeeze = async (bytes, fmt, Stream) => new Uint8Array(await new Response(
 // usable; only a trap (WebAssembly.RuntimeError) drops it, as its state may
 // be broken. Requests come one at a time (app.js awaits each).
 let pageReader = null;
+// In low memory, a photo goes to the reader at most this wide (homr works on
+// the page 1920 wide, after cropping its margins): a phone's 12 MP photo took
+// the reader past what Safari would give it, low memory or not (an iPhone on
+// iOS 17, 24 Nov). Positions come back on the photo.
+const SMALLER_PAGE = 2600;
+let smallerPages = false;
 // page.image, and its pixels, are let go once they're in the reader, so they
 // aren't kept while segnet runs (a phone's photo: about 50 MB).
 async function openPage(page, systemsJson, packed) {
@@ -647,19 +657,20 @@ async function openPage(page, systemsJson, packed) {
   const ms = {};
   let t = performance.now();
   const lap = (k) => { const n = performance.now(); ms[k] = n - t; t = n; };
-  let img = await pixels(page.image);
+  let img = await pixels(page.image, smallerPages ? SMALLER_PAGE : Infinity);
+  const photoW = img.photoWidth;
   page.image = null;
   lap("decode");
   const ranges = systemsJson ? JSON.parse(systemsJson).flat() : [];
   const rgba = copyIn(img.data);
   const { width, height } = img;
-  const bytes = img.data.byteLength;
   img = null;
   const sys = copyIn(Float64Array.from(ranges));
-  const tiles = rs.page_open(rgba, width, height, sys, ranges.length / 2);
-  rs.dealloc(rgba, bytes);
+  const tiles = rs.page_open(rgba, width, height, sys, ranges.length / 2, photoW); // the reader keeps rgba
   rs.dealloc(sys, ranges.length * 8);
   lap("tiles");
+  // (It never shrinks: what it grew to is what this page needed.)
+  post({ type: "log", msg: `Page reader memory: ${Math.round(mem().byteLength / 1048576)} MB (page ${width}x${height})` });
 
   let classes = packed ? await squeeze(packed, "deflate", DecompressionStream) : null;
   if (classes?.length !== tiles * WIN * WIN) classes = await segment(rs, tiles);
@@ -825,6 +836,7 @@ self.onmessage = async ({ data }) => {
       if (data.memoryMax > 0) refuseAbove = data.memoryMax;
       if (Number.isInteger(data.threads) && data.threads > 0) encoderThreads = data.threads;
       if (typeof data.gpu === "boolean") encoderGpu = data.gpu;
+      smallerPages = !!data.lowMemory;
       ready ??= init(!!data.noGpu, !!data.exact, !!data.plain, !!data.strictSimd);
       await ready;
     } else if (data.type === "tune") {

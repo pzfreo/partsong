@@ -658,7 +658,7 @@ function startWorker() {
   // (opening the scan screen starts it with nobody waiting: that showed its error raw).
   workerReady.catch(() => {});
   // Low memory: homr-rs's encoder for its memory, plainly (fast) unless ?exact=1.
-  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, plain: lowMemory && !exactEncoder(), noGpu: lowMemory,
+  worker.postMessage({ type: "init", exact: exactEncoder() || lowMemory, plain: lowMemory && !exactEncoder(), noGpu: lowMemory, lowMemory,
     // Test switch (?strictsimd): the reader build without relaxed SIMD, as Safari has.
     strictSimd: new URLSearchParams(location.search).has("strictsimd"), ios: iDevice, threads: tunedThreads(), gpu: tunedGpu(), memoryMax: memoryMaxTest() });
 }
