@@ -384,7 +384,8 @@ async function checkForUpdate() {
   try {
     const html = await (await fetch(`./?check=${Date.now()}`, { cache: "no-store" })).text();
     const live = /app\.js\?v=(\w+)/.exec(html)?.[1];
-    if (live && live !== VERSION && $("update-banner").hidden) {
+    if (live && live !== VERSION && ($("update-banner").hidden || live !== liveVersion)) {
+      // (Also while the banner is up: a later version since then is named.)
       liveVersion = live;
       $("update-text").textContent = `Partsong ${shownVersion(live)} is ready (you have ${SHOWN_VERSION}).`;
       $("update-notes").hidden = true;

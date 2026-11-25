@@ -102,6 +102,11 @@ self.addEventListener("fetch", (e) => {
         return res;
       }).then(isolated), // the reader's threads are workers made from these files: without the headers an isolated page refuses them
     );
+  } else if (url.origin === location.origin && url.pathname.endsWith("/whats-new.html") && url.searchParams.has("check")) {
+    // The update banner's What's new: the live list or none (it says so). A
+    // cached copy, from an earlier look, would be an older list, missing the
+    // version on offer ("nothing you'd notice").
+    return;
   } else if (url.origin === location.origin && !url.pathname.includes("/models/") && !url.pathname.includes("/video/")) {
     // (Videos go straight to the network: Safari plays them only in ranges,
     // which this refetch would drop, and they're too big to keep.)
