@@ -1,4 +1,4 @@
-import { buildScore, parsePage, playOrder } from "./score.js";
+import { buildScore, parsePage, playOrder, spreadGutter } from "./score.js";
 import { Player } from "./player.js";
 import { AUDIO_RATE, audioFile } from "./audio.js";
 import * as db from "./db.js";
@@ -1445,6 +1445,7 @@ async function normalise(blob, page) {
   bmp.close();
   if (page) page.mp = Math.max(1, Math.round((canvas.width * canvas.height) / 1e6));
   if (page) page.shape = canvas.width > canvas.height ? "landscape" : "portrait";
+  if (page) page.dims = [canvas.width, canvas.height]; // the size the reader gets: its positions are on this
   const png = await canvas.convertToBlob({ type: "image/png" });
   canvas.width = canvas.height = 0; // its memory back now, not when collected (see pdf-pages.js)
   return png.arrayBuffer();
@@ -1506,14 +1507,53 @@ function doubtfulPages(s, todo) {
   return todo.filter((i) => shape(i) && shape(i) !== usual);
 }
 
+// A photo cut in two at x (a position on the page as the reader got it, whose
+// width was w), from the full-size picture: [left, right] blobs.
+async function cutPhoto(blob, x, w) {
+  const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" });
+  const cut = Math.round((x / w) * bmp.width);
+  const type = blob.type === "image/png" ? "image/png" : "image/jpeg";
+  const half = async (x0, x1) => {
+    const c = new OffscreenCanvas(x1 - x0, bmp.height);
+    c.getContext("2d").drawImage(bmp, x0, 0, x1 - x0, bmp.height, 0, 0, x1 - x0, bmp.height);
+    const out = await c.convertToBlob({ type, quality: 0.92 });
+    c.width = c.height = 0; // its memory back now, not when collected (see pdf-pages.js)
+    return out;
+  };
+  try {
+    return [await half(0, cut), await half(cut, bmp.width)];
+  } finally {
+    bmp.close();
+  }
+}
+
+// Page i is two pages side by side (an open book, or a page in two columns):
+// replaced by its left and right halves, whose systems are found next.
+// Read as one page its staves mix up into one muddled part (92 bars for 38).
+async function splitPage(s, i, x) {
+  const p = s.pages[i];
+  const [left, right] = await cutPhoto(p.blob, x, p.dims[0]);
+  URL.revokeObjectURL(p.url);
+  const half = (blob) => ({ blob, url: URL.createObjectURL(blob), from: p.from, noSplit: true });
+  s.pages.splice(i, 1, half(left), half(right));
+  (s.splitNotes ??= []).push(`Page ${i + 1} was two pages side by side, so it's now pages ${i + 1} and ${i + 2}.`);
+  track("spread-split");
+  renderPages();
+  // The photos are stored already: the two halves now.
+  if (s.id && !s.rereading) await db.update(s.id, { images: s.pages.map((q) => q.blob), found: foundLayouts(s) }).catch(() => {});
+}
+const splitNote = (s) => (s.splitNotes?.length ? ` ${s.splitNotes.join(" ")}` : "");
+
 async function checkSystems(s, stopped) {
-  const todo = s.pages.map((_, i) => i).filter((i) => !s.pages[i].xml);
+  let todo = s.pages.map((_, i) => i).filter((i) => !s.pages[i].xml);
   // Each page is shown to check as soon as its systems are found, so you
   // check page 1 while the rest are found; Read music waits for the last.
   let check = null;
   let finderRan = false;
   try {
-    for (const i of todo) {
+    // (A page that turns out to be two is replaced by its halves, which come next.)
+    for (let i = 0; i < s.pages.length; i++) {
+      if (s.pages[i].xml) continue;
       // Progress is on the status line until the check opens, then on its bar.
       pageLabel = check ? "" : `Page ${i + 1} of ${s.pages.length}`;
       s.working = i; // for an error's message and record: the page it was on
@@ -1529,6 +1569,15 @@ async function checkSystems(s, stopped) {
           s.pages[i].layout = r.systems;
           s.pages[i].parts = r.parts;
           s.pages[i].classes = r.classes;
+          // Not for a scan read again or with fixed systems: its pages are numbered, and were split when first read.
+          const dims = s.pages[i].dims;
+          const cut = s.rereading || s.pages[i].noSplit || !dims || Object.keys(s.settings.systemHints ?? {}).length ? null : spreadGutter(r.systems, dims[0], dims[1]);
+          if (cut != null) {
+            await splitPage(s, i, cut);
+            if (check) $("check-intro").textContent = CHECK_INTRO + splitNote(s);
+            i--; // the left half
+            continue;
+          }
           if (s.id && !s.rereading) await db.update(s.id, { found: foundLayouts(s), resumes: 0 }).catch(() => {});
           s.resumes = 0; // progress
         } catch (e) {
@@ -1541,11 +1590,13 @@ async function checkSystems(s, stopped) {
           pageLabel = "";
           setPageStatus("");
           check = openCheck(s);
+          if (s.splitNotes?.length) $("check-intro").textContent = CHECK_INTRO + splitNote(s);
         }
         check.add(i);
       }
     }
     pageLabel = "";
+    todo = s.pages.map((_, i) => i).filter((i) => !s.pages[i].xml);
     const found = `Systems (staves in each): ${todo.map((i) => `p${i + 1} ${(s.pages[i].layout ?? []).map((sys) => sys.length).join(",") || "none"} parts ${s.pages[i].parts?.join("") ?? "-"}`).join("; ")}`;
     console.log("[omr]", found);
     remember(readerLog, found, 40);

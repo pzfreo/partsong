@@ -999,3 +999,31 @@ function labelLines(partLines, info, partCount) {
   }
   return partLines.map((l, i) => ({ ...l, label: `Part ${info.key.replace("#", ".")} line ${i + 1}` }));
 }
+
+// A wide page whose staves fall in two columns side by side (an open book, or a
+// page set in two columns) is two pages: the x to cut it at, or null.
+// systems: per system its staves' [x0, y0, x1, y1] on the page, w x h pixels.
+// The cut goes through the widest gap between the staves' left and right ends
+// that lies in the middle of the page; both sides must have two or more staves,
+// over the same stretch of the page's height (one above the other is not a
+// spread). A page of full-width staves has no such gap.
+export function spreadGutter(systems, w, h) {
+  if (!(w > 1.15 * h)) return null;
+  const staves = systems.flat();
+  if (staves.length < 4) return null;
+  const spans = staves.map((s) => [s[0], s[2]]).sort((a, b) => a[0] - b[0]);
+  let reach = spans[0][1];
+  let best = null;
+  for (const [a, b] of spans.slice(1)) {
+    if (a > reach && (!best || a - reach > best.gap)) best = { gap: a - reach, at: (a + reach) / 2 };
+    reach = Math.max(reach, b);
+  }
+  if (!best || best.gap < 0.03 * w || best.at < 0.3 * w || best.at > 0.7 * w) return null;
+  const left = staves.filter((s) => s[2] <= best.at);
+  const right = staves.filter((s) => s[0] >= best.at);
+  if (left.length < 2 || right.length < 2) return null;
+  const top = (l) => Math.min(...l.map((s) => s[1]));
+  const bottom = (l) => Math.max(...l.map((s) => s[3]));
+  const overlap = Math.min(bottom(left), bottom(right)) - Math.max(top(left), top(right));
+  return overlap >= 0.5 * Math.min(bottom(left) - top(left), bottom(right) - top(right)) ? best.at : null;
+}

@@ -16,8 +16,8 @@ const EXPECT = {
   "landscape-frame-50.jpg": { outcome: "no music", gap: "the page 50% of the frame's height is not found" },
   "landscape-frame-35.jpg": { outcome: "no music", gap: "the page 35% of the frame's height is not found" },
   "landscape-frame-96.pdf": { outcome: "no music", gap: "the same page as a landscape PDF (drawn at 2480 wide) is not found" },
-  "landscape-spread.jpg": { outcome: "read", bars: 92, gap: "two pages side by side read as one muddled part: 92 bars, should be 38 on two pages" },
-  "landscape-spread.pdf": { outcome: "read", bars: 92, gap: "as the photo" },
+  "landscape-spread.jpg": { outcome: "read", bars: 38, pages: 2 },   // split into its two pages (it read as one muddled part, 92 bars)
+  "landscape-spread.pdf": { outcome: "read", bars: 38, pages: 2 },
 };
 const seen = [], systems = [];
 const log = console.log;
@@ -46,7 +46,8 @@ if ($("check-done").hidden) {
     r.outcome = "read";
     r.bars = entry.pages.reduce((n, x) => n + barsIn(x), 0);
     r.lines = entry.pages.map((x) => (x.match(/<part id=/g) ?? []).length);
+    r.pages = entry.pages.length;
   }
 }
 const want = EXPECT[file];
-window.result = { ...r, gap: want?.gap, ok: !!want && r.outcome.startsWith(want.outcome) && (want.bars == null || r.bars === want.bars) };
+window.result = { ...r, gap: want?.gap, ok: !!want && r.outcome.startsWith(want.outcome) && (want.bars == null || r.bars === want.bars) && (want.pages == null || r.pages === want.pages) };
