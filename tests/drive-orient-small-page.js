@@ -15,4 +15,10 @@ for (const f of ["landscape-frame-96.jpg", "landscape-frame-70.jpg", "landscape-
   check(f + " turned", isSideways(await turned(b)), true);
 }
 for (const f of ["cam_0_exif1.jpg", "cam_1_exif1.jpg", "cam_2_exif3.jpg", "cam_3_exif1.jpg"]) check(f, isSideways(await load(f)), true);
+// A nearly blank sheet with one line of ink (a door frame): judged without throwing (the ink box was one
+// pixel wide, and looking at it threw "source width is 0", so the page couldn't be added).
+const sheet = async (draw) => { const c = new OffscreenCanvas(4000, 3000); const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, 4000, 3000); g.fillStyle = "#000"; draw(g); return createImageBitmap(c); };
+for (const [name, draw] of [["vertical line", (g) => g.fillRect(2000, 0, 6, 3000)], ["horizontal line", (g) => g.fillRect(0, 1500, 4000, 6)], ["blank", () => {}]]) {
+  try { isSideways(await sheet(draw)); } catch (e) { wrong.push(`${name}: threw ${e.message}`); }
+}
 window.result = { wrong, ok: wrong.length === 0 };

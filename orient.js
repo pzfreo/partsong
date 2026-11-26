@@ -9,9 +9,11 @@ function inkMask(bitmap, region = [0, 0, bitmap.width, bitmap.height], long = SA
   const scale = Math.min(1, long / Math.max(region[2], region[3]));
   const w = Math.round(region[2] * scale);
   const h = Math.round(region[3] * scale);
-  const ctx = new OffscreenCanvas(w, h).getContext("2d", { willReadFrequently: true });
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(bitmap, ...region, 0, 0, w, h);
   const px = ctx.getImageData(0, 0, w, h).data;
+  canvas.width = canvas.height = 0; // its memory back now, not when collected
   const lum = new Float32Array(w * h);
   let mean = 0;
   for (let i = 0; i < w * h; i++) {
@@ -64,7 +66,9 @@ function inkBox({ ink, w, h }) {
   const [mx, my] = [(x1 - x0) * 0.06, (y1 - y0) * 0.06];
   const left = Math.max(0, x0 - mx);
   const top = Math.max(0, y0 - my);
-  return [left, top, Math.min(w, x1 + mx) - left, Math.min(h, y1 + my) - top];
+  const box = [left, top, Math.min(w, x1 + mx) - left, Math.min(h, y1 + my) - top];
+  // One line of ink (a door frame, a nearly blank sheet) is no page: a box that thin can't be looked at.
+  return box[2] < 4 || box[3] < 4 ? null : box;
 }
 
 // True when the staff lines run top-to-bottom. A page that fills only part of
@@ -78,7 +82,9 @@ export function isSideways(bitmap) {
   let ink = first;
   if (box && box[2] * box[3] <= 0.6 * first.w * first.h) {
     const k = bitmap.width / first.w;
-    ink = inkMask(bitmap, box.map((v) => v * k), 1400);
+    try {
+      ink = inkMask(bitmap, box.map((v) => v * k), 1400);
+    } catch {} // (the first look stands)
   }
   const { rows, cols } = profiles(ink);
   return spikiness(cols) > 1.5 * spikiness(rows);

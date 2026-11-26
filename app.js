@@ -1876,7 +1876,9 @@ async function readScan() {
     }
     setPageStatus(
       NO_MUSIC.test(e.message)
-        ? `Page ${page} doesn't look like sheet music, or the music is too small in the photo.\nMove closer so the page fills the screen, and retake it${s.pages[page - 1]?.shape === "landscape" ? " (hold the phone upright for an upright page)" : ""}. If it's sideways, tap ↻ on it to turn it. Or remove it (×) and press Read music again.`
+        ? s.pages[page - 1]?.from === "PDF"
+          ? `Page ${page} doesn't look like sheet music.\nIf it's sideways, tap ↻ on it to turn it. Or remove it (×) and press Read music again.`
+          : `Page ${page} doesn't look like sheet music, or the music is too small in the photo.\nMove closer so the page fills the screen, and retake it${s.pages[page - 1]?.shape === "landscape" ? " (hold the phone upright for an upright page)" : ""}. If it's sideways, tap ↻ on it to turn it. Or remove it (×) and press Read music again.`
         : outOfMemory
           ? `Couldn't read page ${page}: there wasn't enough memory.\nClose other apps and browser tabs, then tap Read music to carry on from this page.`
           : e.panic

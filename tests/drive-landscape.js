@@ -3,8 +3,9 @@
 // of the page), the systems it found, and the bars read against the Huron
 // Carol answer key. The file is the page's ?f=:
 //   node scripts/headless-test.mjs "http://localhost:8765/index.html?f=landscape-frame-70.jpg" out.json 600 tests/drive-landscape.js
-// EXPECT is what the reader does today (24 Nov). A "gap" is a page it should
-// read and doesn't: when one is fixed this fails, so the table gets updated.
+// EXPECT is what the reader does today (26 Nov): when something is fixed or
+// breaks, this fails and the table is looked at. A "gap" is a page it should
+// read and doesn't.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(200); } throw new Error("timeout waiting for " + label + " | " + document.getElementById("status").textContent); };
 const $ = (id) => document.getElementById(id);
@@ -23,7 +24,11 @@ const EXPECT = {
   "landscape-frame-70.jpg": { outcome: "read", bars: 28 },           // reads, with errors (22 right): it was "no music" while the sideways test turned the page onto its side
   "landscape-frame-50.jpg": { outcome: "no music", advice: true },
   "landscape-frame-35.jpg": { outcome: "no music", advice: true },
-  "landscape-frame-96.pdf": { outcome: "no music", advice: true, gap: "the same page as a landscape PDF (drawn at 2480 wide) is not found" },
+  // The same pages as landscape PDFs (drawn 2480 wide): they failed too, and for the same reason (turned onto their side).
+  "landscape-frame-96.pdf": { outcome: "read", bars: 22 },
+  "landscape-frame-70.pdf": { outcome: "read", bars: 22 },
+  "landscape-frame-50.pdf": { outcome: "no music", advice: false },   // (a PDF's message leaves out "retake the photo")
+  "landscape-frame-35.pdf": { outcome: "no music", advice: false },
   "landscape-spread.jpg": { outcome: "read", bars: 38, pages: 2, note: true },   // split into its two pages (it read as one muddled part, 92 bars)
   "landscape-spread.pdf": { outcome: "read", bars: 38, pages: 2, note: true },
   "landscape-spread.jpg#failcut": { outcome: "read", bars: 92, pages: 1 },       // the cut failed: read whole, as before
