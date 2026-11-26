@@ -1287,7 +1287,8 @@ async function addPage(image, from, mine) {
   // Our own copy: iOS can stop letting Safari read a picked photo later (e.g.
   // after the app was in the background), and an upright photo is kept as is.
   const copy = new Blob([await image.arrayBuffer()], { type: image.type });
-  const blob = await uprightPhoto(copy);
+  // (Test switch ?noupright: as taken, to tell the reader's reading from the turning.)
+  const blob = new URLSearchParams(location.search).has("noupright") ? copy : await uprightPhoto(copy);
   if (mine !== scan) return false;
   const p = { blob, url: URL.createObjectURL(blob), from };
   scan.pages.push(p);
@@ -1875,7 +1876,7 @@ async function readScan() {
     }
     setPageStatus(
       NO_MUSIC.test(e.message)
-        ? `Page ${page} doesn't look like sheet music.\nIf it's sideways, tap ↻ on it to turn it. Otherwise retake the photo straight on, in good light, or remove it (×) and press Read music again.`
+        ? `Page ${page} doesn't look like sheet music, or the music is too small in the photo.\nMove closer so the page fills the screen, and retake it${s.pages[page - 1]?.shape === "landscape" ? " (hold the phone upright for an upright page)" : ""}. If it's sideways, tap ↻ on it to turn it. Or remove it (×) and press Read music again.`
         : outOfMemory
           ? `Couldn't read page ${page}: there wasn't enough memory.\nClose other apps and browser tabs, then tap Read music to carry on from this page.`
           : e.panic
