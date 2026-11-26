@@ -1514,8 +1514,10 @@ async function cutPhoto(blob, x, w) {
   const cut = Math.round((x / w) * bmp.width);
   const type = blob.type === "image/png" ? "image/png" : "image/jpeg";
   const half = async (x0, x1) => {
-    const c = new OffscreenCanvas(x1 - x0, bmp.height);
-    c.getContext("2d").drawImage(bmp, x0, 0, x1 - x0, bmp.height, 0, 0, x1 - x0, bmp.height);
+    // At most the size a page is read at (a 48 MP photo's half is over what Safari draws on a canvas).
+    const k = Math.min(1, 4200 / Math.max(x1 - x0, bmp.height));
+    const c = new OffscreenCanvas(Math.round((x1 - x0) * k), Math.round(bmp.height * k));
+    c.getContext("2d").drawImage(bmp, x0, 0, x1 - x0, bmp.height, 0, 0, c.width, c.height);
     const out = await c.convertToBlob({ type, quality: 0.92 });
     c.width = c.height = 0; // its memory back now, not when collected (see pdf-pages.js)
     return out;
@@ -1532,15 +1534,22 @@ async function cutPhoto(blob, x, w) {
 // Read as one page its staves mix up into one muddled part (92 bars for 38).
 async function splitPage(s, i, x) {
   const p = s.pages[i];
-  const [left, right] = await cutPhoto(p.blob, x, p.dims[0]);
+  let left, right;
+  try {
+    [left, right] = await cutPhoto(p.blob, x, p.dims[0]);
+  } catch {
+    p.noSplit = true; // couldn't be cut (a picture too big, or lost): read as it is
+    return false;
+  }
   URL.revokeObjectURL(p.url);
   const half = (blob) => ({ blob, url: URL.createObjectURL(blob), from: p.from, noSplit: true });
   s.pages.splice(i, 1, half(left), half(right));
   (s.splitNotes ??= []).push(`Page ${i + 1} was two pages side by side, so it's now pages ${i + 1} and ${i + 2}.`);
   track("spread-split");
   renderPages();
-  // The photos are stored already: the two halves now.
-  if (s.id && !s.rereading) await db.update(s.id, { images: s.pages.map((q) => q.blob), found: foundLayouts(s) }).catch(() => {});
+  // The photos are stored already: the two halves now (and the music read so far, by page).
+  if (s.id && !s.rereading) await db.update(s.id, { images: s.pages.map((q) => q.blob), pages: s.pages.map((q) => q.xml ?? null), found: foundLayouts(s) }).catch(() => {});
+  return true;
 }
 const splitNote = (s) => (s.splitNotes?.length ? ` ${s.splitNotes.join(" ")}` : "");
 
@@ -1572,8 +1581,7 @@ async function checkSystems(s, stopped) {
           // Not for a scan read again or with fixed systems: its pages are numbered, and were split when first read.
           const dims = s.pages[i].dims;
           const cut = s.rereading || s.pages[i].noSplit || !dims || Object.keys(s.settings.systemHints ?? {}).length ? null : spreadGutter(r.systems, dims[0], dims[1]);
-          if (cut != null) {
-            await splitPage(s, i, cut);
+          if (cut != null && (await splitPage(s, i, cut))) {
             if (check) $("check-intro").textContent = CHECK_INTRO + splitNote(s);
             i--; // the left half
             continue;
@@ -1698,7 +1706,7 @@ function openCheck(s) {
       for (const i of doubtful) if (labels[i]) labels[i].textContent += ": looks unusual";
       const which = doubtful.map((i) => i + 1);
       const named = which.length > 1 ? `Pages ${which.slice(0, -1).join(", ")} and ${which.at(-1)} look` : `Page ${which[0]} looks`;
-      $("check-intro").textContent = CHECK_LINES + (which.length ? ` ${named} unusual.` : "");
+      $("check-intro").textContent = CHECK_LINES + (which.length ? ` ${named} unusual.` : "") + splitNote(s);
       $("check-wait").textContent = "Red lines look right?";
       $("check-keep").hidden = true;
       $("check-stop").hidden = true;

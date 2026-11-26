@@ -9,6 +9,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms, label) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch {} await sleep(200); } throw new Error("timeout waiting for " + label + " | " + document.getElementById("status").textContent); };
 const $ = (id) => document.getElementById(id);
 const file = new URLSearchParams(location.search).get("f");
+// ?failcut=1: cutting the photo fails (a picture too big for the canvas): the page is read whole, not failed.
+const failcut = new URLSearchParams(location.search).has("failcut");
+if (failcut) {
+  const encode = OffscreenCanvas.prototype.convertToBlob;
+  OffscreenCanvas.prototype.convertToBlob = function (o) { return o?.type === "image/jpeg" ? Promise.reject(new Error("canvas too big")) : encode.call(this, o); };
+}
 const EXPECT = {
   "huron_0.png": { outcome: "read", bars: 22 },                      // a portrait page: the baseline
   "landscape-frame-96.jpg": { outcome: "read", bars: 22 },           // the page fills the frame's height
@@ -16,8 +22,9 @@ const EXPECT = {
   "landscape-frame-50.jpg": { outcome: "no music", gap: "the page 50% of the frame's height is not found" },
   "landscape-frame-35.jpg": { outcome: "no music", gap: "the page 35% of the frame's height is not found" },
   "landscape-frame-96.pdf": { outcome: "no music", gap: "the same page as a landscape PDF (drawn at 2480 wide) is not found" },
-  "landscape-spread.jpg": { outcome: "read", bars: 38, pages: 2 },   // split into its two pages (it read as one muddled part, 92 bars)
-  "landscape-spread.pdf": { outcome: "read", bars: 38, pages: 2 },
+  "landscape-spread.jpg": { outcome: "read", bars: 38, pages: 2, note: true },   // split into its two pages (it read as one muddled part, 92 bars)
+  "landscape-spread.pdf": { outcome: "read", bars: 38, pages: 2, note: true },
+  "landscape-spread.jpg#failcut": { outcome: "read", bars: 92, pages: 1 },       // the cut failed: read whole, as before
 };
 const seen = [], systems = [];
 const log = console.log;
@@ -38,6 +45,7 @@ const r = { file, expected, seen: seen[0] ?? null, systems: systems[0] ?? null }
 if ($("check-done").hidden) {
   r.outcome = "no music: " + $("status").textContent.split("\n")[0];
 } else {
+  r.note = /two pages side by side/.test($("check-intro").textContent); // still said when the systems are all found
   $("check-done").click();
   await waitFor(() => !$("practice").hidden || /Couldn't|doesn't look like sheet music/.test($("status").textContent), 900000, "read");
   if ($("practice").hidden) r.outcome = "failed: " + $("status").textContent.split("\n")[0];
@@ -49,5 +57,5 @@ if ($("check-done").hidden) {
     r.pages = entry.pages.length;
   }
 }
-const want = EXPECT[file];
-window.result = { ...r, gap: want?.gap, ok: !!want && r.outcome.startsWith(want.outcome) && (want.bars == null || r.bars === want.bars) && (want.pages == null || r.pages === want.pages) };
+const want = EXPECT[file + (failcut ? "#failcut" : "")];
+window.result = { ...r, gap: want?.gap, ok: !!want && r.outcome.startsWith(want.outcome) && (want.bars == null || r.bars === want.bars) && (want.pages == null || r.pages === want.pages) && (want.note == null || r.note === want.note) };
