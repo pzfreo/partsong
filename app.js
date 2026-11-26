@@ -1046,9 +1046,17 @@ function track(name, title = name, tries = 30) {
 
 // Whether people come back: once a day, on opening, how many different days
 // this device has used Partsong, how long since its first, and how many
-// scores it holds, each in broad groups. The counts stay on the device; no
-// id is sent, so nothing links one device's counts together.
-const USE_DAYS = "partsong-use-days"; // { first, last, days }
+// scores it holds, each in broad groups. And once a week, a device that has
+// been used on three or more days counts itself as a regular, with nothing
+// else: how many people use Partsong regularly, which the daily counts can't
+// say (they count device-days). The counts stay on the device; no id is sent,
+// so nothing links one device's counts together.
+const USE_DAYS = "partsong-use-days"; // { first, last, days, week: the Monday of the week it counted itself regular }
+const weekOf = (date) => { // the Monday of date's (local) week, YYYY-MM-DD
+  const d = new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.toLocaleDateString("en-CA");
+};
 const group = (n, edges, from = 0) => {
   for (const [i, e] of edges.entries()) {
     if (n < e) {
@@ -1063,13 +1071,16 @@ async function countReturn() {
     const today = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD, local
     const was = JSON.parse(localStorage.getItem(USE_DAYS) || "null");
     if (was?.last === today) return;
-    const use = { first: was?.first ?? today, last: today, days: (was?.days ?? 0) + 1 };
+    const days = (was?.days ?? 0) + 1;
+    const regular = days >= 3 && was?.week !== weekOf(today); // the first open of the week, once it's a regular
+    const use = { first: was?.first ?? today, last: today, days, week: regular ? weekOf(today) : was?.week };
     localStorage.setItem(USE_DAYS, JSON.stringify(use));
     const since = Math.round((Date.parse(today) - Date.parse(use.first)) / 864e5);
     const scores = (await db.list().catch(() => [])).filter((e) => !e.pending).length;
     track(`use: day ${group(use.days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
     track(`use: first ${since === 0 ? "today" : since < 7 ? "1–6 days ago" : since < 28 ? "1–4 weeks ago" : since < 91 ? "1–3 months ago" : "3+ months ago"}`);
     track(`library: ${group(scores, [1, 2, 3, 4, 6, 11, 21, 51])} scores`);
+    if (regular) track("use: regular this week");
   } catch {}
 }
 

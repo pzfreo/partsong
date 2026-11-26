@@ -164,8 +164,9 @@ function page(days, { start, hits }, problems) {
     ["Came back a 2nd day", sum(is("use: day 2"))],
     ["Reached a 3rd day", sum(is("use: day 3"))],
     ["Days used by devices on day 3+", sum((p) => DAY3.test(p))],
+    ["Regular devices", sum(is("use: regular this week"))],
   ].map(([n, v]) => `<div class="tile"><div class="v">${v}</div><div class="l">${n}</div></div>`).join("")}</div>
-  <p class="note">Each device counts once a day; nothing links one device's days together. "Reached a 3rd day" counts each device once. Regular users active in the period lie between the busiest single day and the last figure.</p>`;
+  <p class="note">Each device counts once a day; nothing links one device's days together. "Reached a 3rd day" counts each device once. Regular users active in the period lie between the busiest single day and the last figure. "Regular devices" is exact: each device used on 3+ days counts itself once a calendar week (Monday to Sunday), so a period crossing a Monday can count a device twice; it starts from 26 Nov.</p>`;
 
   // Everything, most first.
   const all = hits.map((h) => [h.path, total(h)]).filter(([, n]) => n).sort((a, b) => b[1] - a[1]);
