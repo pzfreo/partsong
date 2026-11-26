@@ -1073,15 +1073,30 @@ async function countReturn() {
     if (was?.last === today) return;
     const days = (was?.days ?? 0) + 1;
     const regular = days >= 3 && was?.week !== weekOf(today); // the first open of the week, once it's a regular
-    const use = { first: was?.first ?? today, last: today, days, week: regular ? weekOf(today) : was?.week };
+    const use = { first: was?.first ?? today, last: today, days, week: was?.week };
     localStorage.setItem(USE_DAYS, JSON.stringify(use));
     const since = Math.round((Date.parse(today) - Date.parse(use.first)) / 864e5);
     const scores = (await db.list().catch(() => [])).filter((e) => !e.pending).length;
     track(`use: day ${group(use.days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
     track(`use: first ${since === 0 ? "today" : since < 7 ? "1–6 days ago" : since < 28 ? "1–4 weeks ago" : since < 91 ? "1–3 months ago" : "3+ months ago"}`);
     track(`library: ${group(scores, [1, 2, 3, 4, 6, 11, 21, 51])} scores`);
-    if (regular) track("use: regular this week");
+    // The week is noted only once the count has been handed to GoatCounter: if its
+    // script never loaded, or the page closed first, the next open tries again.
+    if (regular && (await trackSent("use: regular this week"))) localStorage.setItem(USE_DAYS, JSON.stringify({ ...use, week: weekOf(today) }));
   } catch {}
+}
+// Like track, but says whether the count was handed over (false after about 15 s without GoatCounter's script).
+async function trackSent(name, tries = 30) {
+  noteAction(name);
+  for (let i = 0; i <= tries; i++) {
+    try {
+      if (window.goatcounter?.count) return (window.goatcounter.count({ path: name, title: name, event: true }), true);
+    } catch {
+      return false;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
 }
 
 // Each new score read (not the sample, not a reading again) counted with how
