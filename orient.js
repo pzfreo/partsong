@@ -4,12 +4,13 @@
 
 const SAMPLE = 800; // analysis size, long side
 
-function inkMask(bitmap) {
-  const scale = Math.min(1, SAMPLE / Math.max(bitmap.width, bitmap.height));
-  const w = Math.round(bitmap.width * scale);
-  const h = Math.round(bitmap.height * scale);
+// region: [x, y, w, h] of the bitmap to look at (default all of it), long: the sample's long side.
+function inkMask(bitmap, region = [0, 0, bitmap.width, bitmap.height], long = SAMPLE) {
+  const scale = Math.min(1, long / Math.max(region[2], region[3]));
+  const w = Math.round(region[2] * scale);
+  const h = Math.round(region[3] * scale);
   const ctx = new OffscreenCanvas(w, h).getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(bitmap, 0, 0, w, h);
+  ctx.drawImage(bitmap, ...region, 0, 0, w, h);
   const px = ctx.getImageData(0, 0, w, h).data;
   const lum = new Float32Array(w * h);
   let mean = 0;
@@ -49,9 +50,37 @@ function profiles({ ink, w, h }) {
   return { rows, cols };
 }
 
-// True when the staff lines run top-to-bottom.
+// Where the page's ink is, as [x, y, w, h] of the sample (its outer 2% of the
+// ink left out, and a margin of 6% put back), or null if there's too little.
+function inkBox({ ink, w, h }) {
+  const xs = [];
+  const ys = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (ink[y * w + x]) (xs.push(x), ys.push(y));
+  if (xs.length < 50) return null;
+  xs.sort((a, b) => a - b);
+  ys.sort((a, b) => a - b);
+  const at = (a, f) => a[Math.min(a.length - 1, Math.floor(a.length * f))];
+  const [x0, x1, y0, y1] = [at(xs, 0.02), at(xs, 0.98), at(ys, 0.02), at(ys, 0.98)];
+  const [mx, my] = [(x1 - x0) * 0.06, (y1 - y0) * 0.06];
+  const left = Math.max(0, x0 - mx);
+  const top = Math.max(0, y0 - my);
+  return [left, top, Math.min(w, x1 + mx) - left, Math.min(h, y1 + my) - top];
+}
+
+// True when the staff lines run top-to-bottom. A page that fills only part of
+// the photo (a desk round it) is looked at again over just its ink, in more
+// detail: at the first sample its staff lines had faded, and upright pages
+// small in the frame were judged sideways (and sideways ones upright), so
+// they were turned the wrong way and the reader found no music.
 export function isSideways(bitmap) {
-  const { rows, cols } = profiles(inkMask(bitmap));
+  const first = inkMask(bitmap);
+  const box = inkBox(first);
+  let ink = first;
+  if (box && box[2] * box[3] <= 0.6 * first.w * first.h) {
+    const k = bitmap.width / first.w;
+    ink = inkMask(bitmap, box.map((v) => v * k), 1400);
+  }
+  const { rows, cols } = profiles(ink);
   return spikiness(cols) > 1.5 * spikiness(rows);
 }
 

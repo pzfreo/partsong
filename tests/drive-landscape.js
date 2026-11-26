@@ -18,9 +18,9 @@ if (failcut) {
 const EXPECT = {
   "huron_0.png": { outcome: "read", bars: 22 },                      // a portrait page: the baseline
   "landscape-frame-96.jpg": { outcome: "read", bars: 22 },           // the page fills the frame's height
-  // The page smaller in the frame than that has too few pixels (70%: 1470 across a 4167 photo; 35%: 740) for the
-  // reader, and cropping can't add them: no music found, with advice to move closer.
-  "landscape-frame-70.jpg": { outcome: "no music", advice: true },
+  // Smaller in the frame than that, the page has too few pixels for the reader (50%: 1050 across a 4167 photo;
+  // 35%: 740), and cropping can't add them: no music found, with advice to move closer.
+  "landscape-frame-70.jpg": { outcome: "read", bars: 28 },           // reads, with errors (22 right): it was "no music" while the sideways test turned the page onto its side
   "landscape-frame-50.jpg": { outcome: "no music", advice: true },
   "landscape-frame-35.jpg": { outcome: "no music", advice: true },
   "landscape-frame-96.pdf": { outcome: "no music", advice: true, gap: "the same page as a landscape PDF (drawn at 2480 wide) is not found" },
