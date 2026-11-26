@@ -857,6 +857,16 @@ if (inAppBrowser) {
 
 // Reading on iPhone/iPad is less reliable: Safari there is short of memory,
 // so a long score can stop part-way (the read then resumes where it stopped).
+// The browser has no WebAssembly SIMD (a processor feature the reader needs):
+// on an iPhone or iPad, software older than iOS 16.4; on a computer, usually
+// an old processor (before about 2011) or the fast mode switched off (some work
+// and school computers), which updating the browser won't fix.
+const noSimdText = () =>
+  iDevice
+    ? `This ${deviceKind === "iPad" ? "iPad" : "iPhone"}'s software is too old to read music (it needs iOS 16.4 or later). Update it in Settings, General, Software Update. If there's no update for it, scan on a computer using Chrome or Edge.`
+    : deviceKind === "Android"
+      ? "This browser is too old to read music. Update Chrome (or the phone's software), or scan on a computer using Chrome or Edge."
+      : "This computer's browser can't run the music reader. Update the browser if you can. If it's already up to date, the computer may be too old (before about 2011) or have the feature switched off (some work and school computers do): try another computer, or scan on a phone.";
 const IOS_NOTE = `If reading music doesn't work on this ${/iPhone|iPod/.test(ua) ? "iPhone" : "iPad"}, Partsong also works on a computer.`;
 if (iDevice) {
   $("device-note").textContent = IOS_NOTE;
@@ -912,7 +922,9 @@ function checkDevice() {
         `This ${what} couldn't set aside enough memory for the music reader just now, so reading would probably fail. ` +
         `Close other apps and ${iDevice ? "Safari" : "browser"} tabs${phone ? ` (or restart the ${what})` : ""}, then open Partsong again.` +
         (phone ? " Or scan on a computer using Chrome or Edge." : "");
-    } else if (r === "no SIMD" || r === "no WebAssembly") {
+    } else if (r === "no SIMD") {
+      note.textContent = noSimdText();
+    } else if (r === "no WebAssembly") {
       note.textContent = "This browser is too old to read music. Update it (or the phone's software), or scan on a computer using Chrome or Edge.";
     } else {
       note.textContent = iDevice ? IOS_NOTE : "";
@@ -1102,6 +1114,7 @@ function countNoMusic(p, e) {
 // without file paths, and with
 // numbers as N so the same failure counts together. Never the score or photo.
 function failureReason(e) {
+  if (/SIMD unsupported/i.test(String(e?.message ?? e))) return "no SIMD"; // not the module's function name
   const last = String(e?.message ?? e).trim().split("\n").at(-1) || e?.name || "unknown";
   return (
     last
@@ -1881,7 +1894,9 @@ async function readScan() {
           : `Page ${page} doesn't look like sheet music, or the music is too small in the photo.\nMove closer so the page fills the screen, and retake it${s.pages[page - 1]?.shape === "landscape" ? " (hold the phone upright for an upright page)" : ""}. If it's sideways, tap ↻ on it to turn it. Or remove it (×) and press Read music again.`
         : outOfMemory
           ? `Couldn't read page ${page}: there wasn't enough memory.\nClose other apps and browser tabs, then tap Read music to carry on from this page.`
-          : e.panic
+          : /SIMD unsupported/i.test(e.message)
+            ? `Couldn't read page ${page}.\n${noSimdText()}`
+            : e.panic
             ? `Couldn't read page ${page}: the music reader went wrong on it, and it's been reported.\nRetaking the photo may get round it.`
             : `Couldn't read page ${page}: ${why}`,
     );
