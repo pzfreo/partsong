@@ -158,6 +158,16 @@ function page(days, { start, hits }, problems) {
   const devices = readTable("Device", byDevice, (a, b) => reads(b[1]) - reads(a[1]));
   const versions = readTable("Version", byVersion, (a, b) => vnum(b[0]) - vnum(a[0]) || a[0].localeCompare(b[0]));
 
+  // Reads by singer (from v372): "read-outcome (new|experienced): ok" etc. Ok, failed,
+  // no music and gave up end a read; restarted and out of memory are steps on the way.
+  const OUT = ["ok", "failed", "no music", "gave up", "restarted", "out of memory"];
+  const bySinger = ["new", "experienced"].map((who) => [who, OUT.map((o) => sum(is(`read-outcome (${who}): ${o}`)))]);
+  const pct = (n, of) => (of ? `${Math.round((n / of) * 100)}%` : "");
+  const singers = `<table><thead><tr><th>Singer</th><th class="n">Read</th><th class="n">Failed</th><th class="n">No music</th><th class="n">Gave up</th><th class="n">Restarted</th><th class="n">Out of memory</th><th class="n">Ended badly</th></tr></thead><tbody>${bySinger
+    .map(([who, [ok, f, nm, gu, rs, oom]]) => `<tr><td>${who === "new" ? "New" : "Experienced"}</td><td class="n">${ok || ""}</td>${[f, nm, gu, rs, oom].map((n) => `<td class="n ${n ? "bad" : ""}">${n || ""}</td>`).join("")}<td class="n" title="${esc(`${f + nm + gu} of ${ok + f + nm + gu} reads`)}"><b>${pct(f + nm + gu, ok + f + nm + gu)}</b></td></tr>`)
+    .join("")}</tbody></table>
+  <p class="note">Experienced: the device has read a score of its own and pressed play on one; new: not yet. Not the sample or reading again. A read ends read, failed, no music or gave up; it can restart or run out of memory on the way, so those are steps, not reads. Ended badly: failed, no music or gave up, of all reads that ended. From v372 (27 Nov); plays weren't stored before, so for the first weeks "new" includes some returning singers.</p>`;
+
   // Regular users: a device passes "use: day 2" and "use: day 3" once each.
   const regular = `<div class="tiles">${[
     ["New devices", sum(is("use: day 1"))],
@@ -202,6 +212,7 @@ th .u{font-weight:400}tfoot th{color:var(--text)}tfoot th,tfoot td{border-top:2p
 <nav>${[7, 14, 28].map((n) => `<a href="?days=${n}" class="${n === days ? "on" : ""}">${n} days</a>`).join("")}</nav>
 <h2>Day by day</h2><section>${daily}</section>
 <h2>Reads by device</h2><section>${devices}</section>
+<h2>Reads by singer</h2><section>${singers}</section>
 <h2>Reads by version</h2><section>${versions}</section>
 <h2>Coming back</h2><section>${regular}</section>
 <h2>Problem log, last 2 days</h2><section>${log}<p class="note">In full: scripts/problem-log.sh visit &lt;visit&gt;</p></section>
