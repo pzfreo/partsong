@@ -42,6 +42,6 @@ await seed(0, [page]);
 await open(true);
 r.lowMemoryInit = inits.map((m) => ({ exact: m.exact, noGpu: m.noGpu }));
 await seed(null);
-r.ok = JSON.stringify(r.lowMemoryInit) === JSON.stringify([{ exact: true, noGpu: true }]) && r.restarted.some((p) => /^read-restarted \(\w+ \w+\): finding systems, 0 pages, on screen$/.test(p)) && r.background.some((p) => /^read-restarted \(\w+ \w+\): finding systems, 0 pages, in the background$/.test(p)) && /^read-gave-up \(\w+ \w+\): finding systems, 0 pages, on screen$/.test(r.gaveUp.join()) && r.gaveUpAgain.length === 0
+r.ok = JSON.stringify(r.lowMemoryInit) === JSON.stringify([{ exact: true, noGpu: true }]) && r.restarted.some((p) => /^read-restarted \(\w+ \w+\): finding systems, 0 pages, on screen$/.test(p)) && r.background.some((p) => /^read-restarted \(\w+ \w+\): finding systems, 0 pages, in the background$/.test(p)) && /^read-gave-up \(\w+ \w+\): finding systems, 0 pages, on screen$/.test(r.gaveUp.filter((p) => !p.startsWith("read-outcome")).join()) && r.gaveUpAgain.length === 0
   && r.launches.join(" ") === "read-restarted - - -" && r.afterError.stopped === true && r.afterError.resumes === 1;
 window.result = r;

@@ -978,7 +978,7 @@ function report(kind, message, more = {}) {
       stage: more.stage ?? screens.find((s) => !$(s).hidden) ?? "",
       message: String(message).slice(0, 2000),
       place: more.place ? String(more.place).slice(0, 2000) : undefined,
-      detail: { lowMemory, isolated: self.crossOriginIsolated, cores: navigator.hardwareConcurrency, memoryGB: navigator.deviceMemory, ...more.detail },
+      detail: { lowMemory, isolated: self.crossOriginIsolated, cores: navigator.hardwareConcurrency, memoryGB: navigator.deviceMemory, singer: experience(), ...more.detail },
       reader: more.reader ?? readerLog.slice(-20).join("\n"),
     });
     // (A string body is text/plain: a "simple" request, with no preflight.)
@@ -1112,6 +1112,20 @@ function countRead() {
     track(`read-ok: score ${group(n, [2, 3, 4, 6, 11], 1)}, day ${group(days, [2, 3, 4, 6, 11, 21, 51], 1)}`);
   } catch {}
 }
+
+// Each read's outcome counted again by who the singer is, to see whether failures
+// fall on new singers or on ones who have already used Partsong: "experienced" once
+// this device has read a score of its own and pressed play (both stored), "new"
+// before, e.g. "read-outcome (new): restarted". Not the sample or a reading again.
+// One read can count more than once: "restarted" and "out of memory" are steps on the
+// way; ok, failed, no music and gave up end it (rates: ended badly / all ended).
+// (Plays before 27 Nov weren't stored: a device that played then counts as new until
+// it plays again.)
+const PLAYED = "partsong-played";
+function experience() {
+  try { return +(localStorage.getItem(READS) || 0) > 0 && localStorage.getItem(PLAYED) === "1" ? "experienced" : "new"; } catch { return "new"; }
+}
+const countOutcome = (outcome) => track(`read-outcome (${experience()}): ${outcome}`);
 
 // A scan with no music found ("doesn't look like sheet music"): is it really
 // not music, or music the reader missed? Counted with where the page came
@@ -1269,7 +1283,8 @@ async function resumeUnfinished() {
   // (Only the first time: a tab that goes twice may be short of memory after all.)
   const slowly = !(hidden && resumes === 0 && !iDevice && deviceKind !== "Android");
   report(resumes === 2 ? "read-gave-up" : "read-restarted", at, { stage: where, reader: before?.reader, detail: { resumes, pages: n, background: hidden, carriesOnSlowly: slowly, ...before?.detail } });
-  if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
+  if (resumes === 2) { if (!entry.sample) countOutcome("gave up"); return track(`read-gave-up (${deviceTag}): ${at}`); } // once
+  if (!entry.sample) countOutcome("restarted");
   track(`read-restarted (${deviceTag}): ${at}`);
   lowMemory ||= slowly; // a stored low memory stays on
   if (slowly && iDevice) rememberLowMemory(); // a closed page on an iPhone or iPad is memory
@@ -1852,6 +1867,7 @@ async function readScan() {
     setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${s.pages.length} page${s.pages.length === 1 ? "" : "s"}`);
     track(`read-ok (${deviceTag})${lowMemory ? ": low memory" : ""}`);
+    if (!s.rereading && !s.settings.sample) countOutcome("ok"); // before countRead: who the singer was when this read started
     // The usual reader finished a whole read of the singer's own pages (not the sample, a reread or the end of a resumed one).
     if (!lowMemory && fresh && !s.rereading && !s.settings.sample) try { localStorage.setItem(USUAL_OK_KEY, "1"); } catch {}
     if (!s.rereading && !s.settings.sample) countRead();
@@ -1889,6 +1905,7 @@ async function readScan() {
     if (outOfMemory && !lowMemory) {
       report("read-out-of-memory", e.message, facts);
       track(`read-out-of-memory (${deviceTag}): carried on in low memory`);
+      if (!s.rereading && !s.settings.sample) countOutcome("out of memory");
       lowMemory = true;
       rememberLowMemory();
       resetWorker();
@@ -1905,6 +1922,7 @@ async function readScan() {
     track("read-failed");
     track(`read-failed (${deviceTag})`);
     track(`read-failed (${deviceTag}): ${failureReason(e)}${lowMemory ? " (low memory)" : ""}`);
+    if (!s.rereading && !s.settings.sample) countOutcome(NO_MUSIC.test(e.message) ? "no music" : "failed");
     if (outOfMemory || e.panic) resetWorker();
     // A long error ends with the actual error; show that first, since the
     // whole message can run off the bottom of a phone screen.
@@ -3478,6 +3496,7 @@ $("play").onclick = () => {
   startPlayback(offset);
   setPlaying(true);
   if (!playTracked) track("play", hasMarks() ? "play (marked)" : "play");
+  if (!current?.sample) try { localStorage.setItem(PLAYED, "1"); } catch {} // a score of the singer's own, or shared to them
   playTracked = true;
   if (current.received && !current.receivedPlayed) {
     current.receivedPlayed = true;
