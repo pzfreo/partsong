@@ -1222,13 +1222,23 @@ const reloadedScan = (() => {
   }
 })();
 // After the phone has closed the page during a read, the rest of this
-// session's reading uses less memory: homr-rs's own encoder on the CPU in
+// session's reading (and, stored, later ones: below) uses less memory: homr-rs's own encoder on the CPU in
 // place of onnxruntime's, and no WebGPU. iPhone simulator, one photo page,
 // the page closed at 820 MB as iOS would: read at the second attempt in 3
 // runs of 3 (about 30 s; peak about 715 MB), where the usual reader was
 // closed every time and never finished.
-// Test switch (?lowmem): read in low memory from the start, as after a closed page.
-let lowMemory = new URLSearchParams(location.search).has("lowmem");
+// Test switch (?lowmem): read in low memory from the start, as after a closed page;
+// ?lowmem=0 forgets a stored low memory (for help with a device that reads slowly).
+// A device that has run out of memory once keeps reading this way (stored), instead of
+// trying the usual reader and being closed each time: a phone that was closed in the usual
+// reader on one read is closed on the next.
+const LOW_MEMORY_KEY = "partsong-low-memory";
+// Unless the usual reader has finished a read on this device: then a closed page was
+// probably the person switching apps, and the next read tries the usual reader again.
+const USUAL_OK_KEY = "partsong-usual-reader-ok";
+function rememberLowMemory() { try { if (localStorage.getItem(USUAL_OK_KEY) !== "1") localStorage.setItem(LOW_MEMORY_KEY, "1"); } catch {} }
+const lowmemSwitch = new URLSearchParams(location.search).get("lowmem");
+let lowMemory = (lowmemSwitch != null && lowmemSwitch !== "0") || (() => { try { if (lowmemSwitch === "0") localStorage.removeItem(LOW_MEMORY_KEY); return localStorage.getItem(LOW_MEMORY_KEY) === "1"; } catch { return false; } })();
 async function resumeUnfinished() {
   // The list, then only the scan to carry on with: this runs just after a
   // phone has closed the page for using too much memory.
@@ -1261,7 +1271,8 @@ async function resumeUnfinished() {
   report(resumes === 2 ? "read-gave-up" : "read-restarted", at, { stage: where, reader: before?.reader, detail: { resumes, pages: n, background: hidden, carriesOnSlowly: slowly, ...before?.detail } });
   if (resumes === 2) return track(`read-gave-up (${deviceTag}): ${at}`); // once
   track(`read-restarted (${deviceTag}): ${at}`);
-  lowMemory = slowly;
+  lowMemory ||= slowly; // a stored low memory stays on
+  if (slowly && iDevice) rememberLowMemory(); // a closed page on an iPhone or iPad is memory
   if (worker) resetWorker(); // started without it (prefetch)
   resumeScan({ ...entry, resumes: resumes + 1 }); // as just saved: readScan's save keeps it
 }
@@ -1841,6 +1852,8 @@ async function readScan() {
     setPageStatus(`Done in ${duration(secs)}`);
     track("read-ok", `${s.pages.length} page${s.pages.length === 1 ? "" : "s"}`);
     track(`read-ok (${deviceTag})${lowMemory ? ": low memory" : ""}`);
+    // The usual reader finished a whole read of the singer's own pages (not the sample, a reread or the end of a resumed one).
+    if (!lowMemory && fresh && !s.rereading && !s.settings.sample) try { localStorage.setItem(USUAL_OK_KEY, "1"); } catch {}
     if (!s.rereading && !s.settings.sample) countRead();
     // Read: Read music does nothing more for it (tapped while the score was
     // being saved, below, it read and saved the scan a second time).
@@ -1877,6 +1890,7 @@ async function readScan() {
       report("read-out-of-memory", e.message, facts);
       track(`read-out-of-memory (${deviceTag}): carried on in low memory`);
       lowMemory = true;
+      rememberLowMemory();
       resetWorker();
       setPageStatus("Running short of memory: carrying on more slowly…");
       setTimeout(readScan); // once this read has finished below
